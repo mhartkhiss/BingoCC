@@ -33,9 +33,15 @@ class CardDetailViewModel(
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CardDetailUiState())
 
-    fun setMarkedAt(row: Int, col: Int, isMarked: Boolean) {
+    fun setMarkedByValue(value: Int, isMarked: Boolean) {
         viewModelScope.launch {
-            repo.setMarkedAt(cardId, row, col, isMarked)
+            repo.setMarkedByValue(value, isMarked)
+        }
+    }
+
+    fun deleteCard() {
+        viewModelScope.launch {
+            repo.deleteCard(cardId)
         }
     }
 }

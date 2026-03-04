@@ -2,7 +2,9 @@ package com.mkz.bingocard.data.repo
 
 import com.mkz.bingocard.data.db.dao.CalledNumberDao
 import com.mkz.bingocard.data.db.dao.CardDao
+import com.mkz.bingocard.data.db.dao.ActivePatternDao
 import com.mkz.bingocard.data.db.dao.PatternDao
+import com.mkz.bingocard.data.db.entities.ActivePatternEntity
 import com.mkz.bingocard.data.db.entities.CalledNumberEntity
 import com.mkz.bingocard.data.db.entities.CardEntity
 import com.mkz.bingocard.data.db.entities.CellEntity
@@ -12,7 +14,8 @@ import kotlinx.coroutines.flow.Flow
 class BingoRepository(
     private val cardDao: CardDao,
     private val patternDao: PatternDao,
-    private val calledNumberDao: CalledNumberDao
+    private val calledNumberDao: CalledNumberDao,
+    private val activePatternDao: ActivePatternDao
 ) {
     fun observeCards(): Flow<List<CardEntity>> = cardDao.observeCards()
 
@@ -33,7 +36,14 @@ class BingoRepository(
 
     suspend fun setMarkedByValue(value: Int, isMarked: Boolean) {
         cardDao.setMarkedByValue(value, isMarked)
-        calledNumberDao.upsertCalledNumber(CalledNumberEntity(value = value, calledAtEpochMs = System.currentTimeMillis()))
+        if (isMarked) {
+            calledNumberDao.upsertCalledNumber(
+                CalledNumberEntity(
+                    value = value,
+                    calledAtEpochMs = System.currentTimeMillis()
+                )
+            )
+        }
     }
 
     suspend fun setMarkedAt(cardId: Long, row: Int, col: Int, isMarked: Boolean) {
@@ -41,7 +51,24 @@ class BingoRepository(
         cardDao.touchCard(cardId, System.currentTimeMillis())
     }
 
+    suspend fun resetAllMarks() {
+        cardDao.resetAllMarks()
+        calledNumberDao.clearCalledNumbers()
+    }
+
     fun observePatterns(): Flow<List<PatternEntity>> = patternDao.observePatterns()
+
+    fun observeActivePatterns(): Flow<List<ActivePatternEntity>> = activePatternDao.observeActivePatterns()
+
+    suspend fun setPatternActive(patternId: Long, active: Boolean) {
+        if (active) {
+            activePatternDao.setActive(ActivePatternEntity(patternId = patternId))
+        } else {
+            activePatternDao.setInactive(patternId)
+        }
+    }
+
+    suspend fun clearActivePatterns() = activePatternDao.clear()
 
     suspend fun insertPattern(pattern: PatternEntity): Long = patternDao.insertPattern(pattern)
 

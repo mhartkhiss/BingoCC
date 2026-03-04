@@ -78,30 +78,46 @@ object PatternEngine {
         return masks
     }
 
+    /**
+     * Generates edge-to-edge diagonals (min 3 cells).
+     * E.g. top-left to bottom-right (full), B row 3 to N row 1, etc.
+     * Excludes "cut" diagonals like top-left to center-only.
+     */
     private fun generateSlantingMasksMin3(): List<Long> {
         val masks = ArrayList<Long>()
         val n = BingoRules.GRID_SIZE
         val minLen = 3
-        val maxLen = n
 
-        fun addDiagonalSegments(isRight: Boolean) {
-            for (len in minLen..maxLen) {
-                for (startRow in 0..(n - len)) {
-                    for (startCol in 0..(n - len)) {
-                        var m = 0L
-                        for (k in 0 until len) {
-                            val r = startRow + k
-                            val c = if (isRight) startCol + k else (startCol + (len - 1 - k))
-                            m = PatternMask.setBit(m, r, c)
-                        }
-                        masks.add(m)
-                    }
+        fun addEdgeToEdgeDiagonal(startRow: Int, startCol: Int, dRow: Int, dCol: Int) {
+            var len = 0
+            var r = startRow
+            var c = startCol
+            while (r in 0 until n && c in 0 until n) {
+                len++
+                r += dRow
+                c += dCol
+            }
+            if (len >= minLen) {
+                var m = 0L
+                r = startRow
+                c = startCol
+                for (k in 0 until len) {
+                    m = PatternMask.setBit(m, r, c)
+                    r += dRow
+                    c += dCol
                 }
+                masks.add(m)
             }
         }
 
-        addDiagonalSegments(isRight = true)
-        addDiagonalSegments(isRight = false)
+        // Down-right (↘): from top edge and left edge
+        for (c in 0..(n - minLen)) addEdgeToEdgeDiagonal(0, c, 1, 1)
+        for (r in 1..(n - minLen)) addEdgeToEdgeDiagonal(r, 0, 1, 1)
+
+        // Up-right (↗): from bottom edge and left edge
+        for (c in 0..(n - minLen)) addEdgeToEdgeDiagonal(n - 1, c, -1, 1)
+        for (r in (n - 2) downTo minLen - 1) addEdgeToEdgeDiagonal(r, 0, -1, 1)
+
         return masks
     }
 }

@@ -60,6 +60,8 @@ dependencies {
     implementation(libs.androidx.camera.extensions)
 
     implementation(libs.google.mlkit.text.recognition)
+    implementation(libs.google.mlkit.document.scanner)
+    implementation(libs.google.generativeai)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)

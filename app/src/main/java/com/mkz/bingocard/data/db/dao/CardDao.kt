@@ -42,6 +42,9 @@ interface CardDao {
     @Query("UPDATE cells SET isMarked = :isMarked WHERE cardId = :cardId AND row = :row AND col = :col")
     suspend fun setMarkedAt(cardId: Long, row: Int, col: Int, isMarked: Boolean)
 
+    @Query("UPDATE cells SET isMarked = 0")
+    suspend fun resetAllMarks()
+
     @Query("UPDATE cards SET updatedAtEpochMs = :updatedAtEpochMs WHERE id = :cardId")
     suspend fun touchCard(cardId: Long, updatedAtEpochMs: Long)
 
