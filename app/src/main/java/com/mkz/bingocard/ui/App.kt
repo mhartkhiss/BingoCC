@@ -136,9 +136,12 @@ fun BingoApp() {
                 CardListScreen(
                     stateFlow = cardsVm.state,
                     onCardClick = { navController.navigate(Routes.cardDetail(it)) },
-                    onCreateRandom = { cardsVm.createRandomCard() },
                     onGalleryClick = { uri ->
                         scanVm.onImagePicked(uri)
+                        navController.navigate(Routes.ScanReview)
+                    },
+                    onManualCreate = {
+                        scanVm.onManualCreate()
                         navController.navigate(Routes.ScanReview)
                     },
                     onOpenDrawer = { scope.launch { drawerState.open() } },
@@ -166,6 +169,8 @@ fun BingoApp() {
                 ScanReviewScreen(
                     stateFlow = scanVm.state,
                     onCellChanged = { row, col, value -> scanVm.updateCell(row, col, value) },
+                    onColorChanged = { scanVm.updateColor(it) },
+                    onRandomize = { scanVm.randomizeGrid() },
                     onSave = {
                         scanVm.saveAsNewCard()
                         navController.popBackStack(Routes.Cards, inclusive = false)

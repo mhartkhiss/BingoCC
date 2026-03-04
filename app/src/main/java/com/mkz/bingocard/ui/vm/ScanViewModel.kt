@@ -116,6 +116,29 @@ class ScanViewModel(private val repo: BingoRepository, private val settingsRepo:
         }
     }
 
+    fun onManualCreate() {
+        val emptyGrid = Array<Int?>(25) { null }
+        _state.value = ScanUiState(
+            imageUri = null,
+            isProcessing = false,
+            errorMessage = null,
+            grid = emptyGrid,
+            cardColor = 0xFF42A5F5 // Default Blue
+        )
+    }
+
+    fun randomizeGrid() {
+        val numbers = BingoRules.generateStandardCardNumbers()
+        val copy = Array<Int?>(BingoRules.GRID_SIZE * BingoRules.GRID_SIZE) { idx ->
+            if (idx == 12) null else numbers[idx]
+        }
+        _state.value = _state.value.copy(grid = copy)
+    }
+
+    fun updateColor(colorArgb: Long) {
+        _state.value = _state.value.copy(cardColor = colorArgb)
+    }
+
     private fun parseGeminiResponse(jsonText: String): Pair<Array<Int?>, Long?>? {
         val grid = Array<Int?>(25) { null }
         var parsedColor: Long? = null
@@ -174,8 +197,9 @@ class ScanViewModel(private val repo: BingoRepository, private val settingsRepo:
         val current = _state.value
         val now = System.currentTimeMillis()
         val color = current.cardColor ?: (0xFF000000L or (Random.nextInt(0x00FFFFFF).toLong()))
+        val suffix = Random.nextInt(1000, 10_000)
         val card = CardEntity(
-            name = "Scanned ${now % 10_000}",
+            name = "Card $suffix",
             createdAtEpochMs = now,
             updatedAtEpochMs = now,
             colorArgb = color

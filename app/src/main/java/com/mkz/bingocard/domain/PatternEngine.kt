@@ -11,6 +11,11 @@ object PatternEngine {
         val isWin: Boolean
     )
 
+    data class PatternHighlights(
+        val winningCellIndexes: Set<Int>,
+        val waitingCellIndexes: Set<Int>
+    )
+
     fun evaluatePatterns(
         cells: List<CellEntity>,
         patterns: List<PatternEntity>
@@ -39,6 +44,61 @@ object PatternEngine {
 
     fun isAnyWin(progress: List<PatternProgress>): Boolean {
         return progress.any { it.isWin }
+    }
+
+    fun computeHighlights(
+        cells: List<CellEntity>,
+        patterns: List<PatternEntity>
+    ): PatternHighlights {
+        val marked = BooleanArray(BingoRules.GRID_SIZE * BingoRules.GRID_SIZE)
+        for (cell in cells) {
+            val idx = cell.row * BingoRules.GRID_SIZE + cell.col
+            marked[idx] = cell.isMarked || cell.isFree
+        }
+
+        val winning = LinkedHashSet<Int>()
+        val waiting = LinkedHashSet<Int>()
+
+        for (pattern in patterns) {
+            val expandedMasks = expandToMasks(pattern)
+            var bestMissing = Int.MAX_VALUE
+            val bestMasks = ArrayList<Long>()
+
+            for (mask in expandedMasks) {
+                val missing = missingCount(mask, marked)
+                when {
+                    missing < bestMissing -> {
+                        bestMissing = missing
+                        bestMasks.clear()
+                        bestMasks.add(mask)
+                    }
+                    missing == bestMissing -> bestMasks.add(mask)
+                }
+            }
+
+            if (bestMissing == 0) {
+                for (mask in bestMasks) {
+                    for (idx in 0 until BingoRules.GRID_SIZE * BingoRules.GRID_SIZE) {
+                        if (mask and (1L shl idx) != 0L) {
+                            winning.add(idx)
+                        }
+                    }
+                }
+            } else if (bestMissing == 1) {
+                for (mask in bestMasks) {
+                    for (idx in 0 until BingoRules.GRID_SIZE * BingoRules.GRID_SIZE) {
+                        if (mask and (1L shl idx) != 0L && !marked[idx]) {
+                            waiting.add(idx)
+                        }
+                    }
+                }
+            }
+        }
+
+        return PatternHighlights(
+            winningCellIndexes = winning,
+            waitingCellIndexes = waiting
+        )
     }
 
     private fun missingCount(mask: Long, marked: BooleanArray): Int {

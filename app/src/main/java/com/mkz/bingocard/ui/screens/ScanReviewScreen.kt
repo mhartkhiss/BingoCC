@@ -9,9 +9,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Button
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -36,10 +45,19 @@ import kotlinx.coroutines.flow.StateFlow
 fun ScanReviewScreen(
     stateFlow: StateFlow<ScanUiState>,
     onCellChanged: (row: Int, col: Int, value: Int?) -> Unit,
+    onColorChanged: (Long) -> Unit,
+    onRandomize: () -> Unit,
     onSave: () -> Unit,
     onBack: () -> Unit
 ) {
     val state by stateFlow.collectAsState()
+
+    val colors = listOf<Long>(
+        0xFFE53935, 0xFFD81B60, 0xFF8E24AA, 0xFF5E35B1, 0xFF3949AB,
+        0xFF1E88E5, 0xFF039BE5, 0xFF00ACC1, 0xFF00897B, 0xFF43A047,
+        0xFF7CB342, 0xFFC0CA33, 0xFFFDD835, 0xFFFFB300, 0xFFFB8C00,
+        0xFFF4511E, 0xFF6D4C41, 0xFF757575, 0xFF546E7A
+    )
 
     Scaffold(
         topBar = {
@@ -61,6 +79,28 @@ fun ScanReviewScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text("Review and edit", style = MaterialTheme.typography.titleMedium)
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                colors.forEach { cCode ->
+                    val isSelected = state.cardColor == cCode
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .background(color = Color(cCode), shape = CircleShape)
+                            .border(
+                                width = if (isSelected) 3.dp else 1.dp,
+                                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.LightGray,
+                                shape = CircleShape
+                            )
+                            .clickable { onColorChanged(cCode) }
+                    )
+                }
+            }
 
             if (state.isProcessing) {
                 Column(
@@ -107,6 +147,14 @@ fun ScanReviewScreen(
             } // closes else block
 
             Spacer(modifier = Modifier.weight(1f))
+
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onRandomize,
+                enabled = !state.isProcessing
+            ) {
+                Text("Randomize")
+            }
 
             Button(
                 modifier = Modifier.fillMaxWidth(),

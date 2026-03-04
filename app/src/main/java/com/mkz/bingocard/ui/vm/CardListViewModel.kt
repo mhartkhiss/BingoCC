@@ -24,6 +24,9 @@ data class CardListItemUi(
     val cardId: Long,
     val name: String,
     val colorArgb: Long,
+    val cells: List<CellEntity>,
+    val winningCellIndexes: Set<Int>,
+    val waitingCellIndexes: Set<Int>,
     val isWin: Boolean,
     val isNearWin: Boolean
 )
@@ -37,6 +40,7 @@ data class PatternChipUi(
 data class CardListUiState(
     val cards: List<CardListItemUi> = emptyList(),
     val patterns: List<PatternChipUi> = emptyList(),
+    val calledNumbers: List<Int> = emptyList(),
     val onTogglePattern: (patternId: Long, active: Boolean) -> Unit = { _, _ -> }
 )
 
@@ -46,16 +50,18 @@ class CardListViewModel(private val repo: BingoRepository) : ViewModel() {
     val state: StateFlow<CardListUiState> = combine(
         repo.observeCards(),
         repo.observePatterns(),
-        repo.observeActivePatterns()
-    ) { cards, patterns, active ->
-        Triple(cards, patterns, active.map { it.patternId }.toSet())
+        repo.observeActivePatterns(),
+        repo.observeCalledNumbers()
+    ) { cards, patterns, active, calledNumbers ->
+        Quad(cards, patterns, active.map { it.patternId }.toSet(), calledNumbers.map { it.value })
     }
-        .flatMapLatest { (cards, patterns, activeIds) ->
+        .flatMapLatest { (cards, patterns, activeIds, calledNumbers) ->
             if (cards.isEmpty()) {
                 MutableStateFlow(
                     CardListUiState(
                         cards = emptyList(),
                         patterns = patterns.toChips(activeIds),
+                        calledNumbers = calledNumbers,
                         onTogglePattern = ::togglePattern
                     )
                 ).map { it }
@@ -68,10 +74,14 @@ class CardListViewModel(private val repo: BingoRepository) : ViewModel() {
                         val progress = PatternEngine.evaluatePatterns(cells, effectivePatterns)
                         val isWin = PatternEngine.isAnyWin(progress)
                         val isNearWin = PatternEngine.isNearWin(progress)
+                        val highlights = PatternEngine.computeHighlights(cells, effectivePatterns)
                         CardListItemUi(
                             cardId = card.id,
                             name = card.name,
                             colorArgb = card.colorArgb,
+                            cells = cells,
+                            winningCellIndexes = highlights.winningCellIndexes,
+                            waitingCellIndexes = highlights.waitingCellIndexes,
                             isWin = isWin,
                             isNearWin = isNearWin
                         )
@@ -85,12 +95,20 @@ class CardListViewModel(private val repo: BingoRepository) : ViewModel() {
                     CardListUiState(
                         cards = sorted,
                         patterns = patterns.toChips(activeIds),
+                        calledNumbers = calledNumbers,
                         onTogglePattern = ::togglePattern
                     )
                 }
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CardListUiState())
+
+    private data class Quad<A, B, C, D>(
+        val first: A,
+        val second: B,
+        val third: C,
+        val fourth: D
+    )
 
     private fun List<PatternEntity>.filterActive(activeIds: Set<Long>): List<PatternEntity> {
         val globallyActive = this.filter { it.isActive }
