@@ -45,6 +45,7 @@ data class CardListUiState(
     val cards: List<CardListItemUi> = emptyList(),
     val patterns: List<PatternChipUi> = emptyList(),
     val calledNumbers: List<Int> = emptyList(),
+    val isLoading: Boolean = true,
     val onTogglePattern: (patternId: Long, active: Boolean) -> Unit = { _, _ -> }
 )
 
@@ -66,6 +67,7 @@ class CardListViewModel(private val repo: BingoRepository) : ViewModel() {
                         cards = emptyList(),
                         patterns = patterns.toChips(activeIds),
                         calledNumbers = calledNumbers,
+                        isLoading = false,
                         onTogglePattern = ::togglePattern
                     )
                 ).map { it }
@@ -108,6 +110,7 @@ class CardListViewModel(private val repo: BingoRepository) : ViewModel() {
                         cards = sorted,
                         patterns = patterns.toChips(activeIds),
                         calledNumbers = calledNumbers,
+                        isLoading = false,
                         onTogglePattern = ::togglePattern
                     )
                 }

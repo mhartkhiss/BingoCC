@@ -17,7 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.Icon
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.IconButton
@@ -82,7 +82,7 @@ fun PatternsScreen(
     onSave: () -> Unit,
     onDelete: () -> Unit,
     onToggleActive: (PatternEntity) -> Unit,
-    onBack: () -> Unit
+    onOpenDrawer: () -> Unit
 ) {
     val state by stateFlow.collectAsState()
     var showEditorSheet by remember { mutableStateOf(false) }
@@ -93,8 +93,8 @@ fun PatternsScreen(
             TopAppBar(
                 title = { Text("Patterns") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Back")
+                    IconButton(onClick = onOpenDrawer) {
+                        Icon(imageVector = Icons.Default.Menu, contentDescription = "Menu")
                     }
                 }
             )

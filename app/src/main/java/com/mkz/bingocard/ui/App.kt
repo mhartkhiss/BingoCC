@@ -23,6 +23,7 @@ import com.mkz.bingocard.ui.screens.CardListScreen
 import com.mkz.bingocard.ui.screens.CropScreen
 import com.mkz.bingocard.ui.screens.PatternsScreen
 import com.mkz.bingocard.ui.screens.ScanReviewScreen
+import com.mkz.bingocard.ui.screens.SplashScreen
 import com.mkz.bingocard.ui.vm.CardDetailViewModel
 import com.mkz.bingocard.ui.vm.CardDetailViewModelFactory
 import com.mkz.bingocard.ui.vm.CardListViewModel
@@ -33,13 +34,33 @@ import com.mkz.bingocard.ui.vm.ScanViewModel
 import com.mkz.bingocard.ui.vm.ScanViewModelFactory
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.Icon
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.layout.ContentScale
+import com.mkz.bingocard.R
 
 object Routes {
+    const val Splash = "splash"
     const val Cards = "cards"
     const val CardDetail = "card/{cardId}"
     const val ScanCamera = "scan/camera"
@@ -71,36 +92,81 @@ fun BingoApp() {
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
-            ModalDrawerSheet {
+            ModalDrawerSheet(
+                modifier = Modifier.fillMaxHeight()
+            ) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(12.dp)
                 ) {
-                NavigationDrawerItem(
-                    label = { androidx.compose.material3.Text("Cards") },
-                    selected = currentRoute == Routes.Cards,
-                    onClick = {
-                        navController.navigate(Routes.Cards) {
-                            popUpTo(Routes.Cards) { inclusive = true }
-                            launchSingleTop = true
-                        }
-                        scope.launch { drawerState.close() }
-                    },
-                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-                )
-                NavigationDrawerItem(
-                    label = { androidx.compose.material3.Text("Win Patterns") },
-                    selected = currentRoute == Routes.Patterns,
-                    onClick = {
-                        navController.navigate(Routes.Patterns) {
-                            launchSingleTop = true
-                        }
-                        scope.launch { drawerState.close() }
-                    },
-                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-                )
+                    // ── Header ──
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp)
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.sidebar_image),
+                            contentDescription = "Sidebar Header",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
 
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // ── Navigation Items ──
+                    NavigationDrawerItem(
+                        icon = {
+                            Icon(
+                                imageVector = Icons.Default.Home,
+                                contentDescription = null
+                            )
+                        },
+                        label = { Text("Cards") },
+                        selected = currentRoute == Routes.Cards,
+                        onClick = {
+                            navController.navigate(Routes.Cards) {
+                                popUpTo(Routes.Cards) { inclusive = true }
+                                launchSingleTop = true
+                            }
+                            scope.launch { drawerState.close() }
+                        },
+                        modifier = Modifier.padding(horizontal = 12.dp)
+                    )
+
+                    NavigationDrawerItem(
+                        icon = {
+                            Icon(
+                                imageVector = Icons.Default.Star,
+                                contentDescription = null
+                            )
+                        },
+                        label = { Text("Win Patterns") },
+                        selected = currentRoute == Routes.Patterns,
+                        onClick = {
+                            navController.navigate(Routes.Patterns) {
+                                launchSingleTop = true
+                            }
+                            scope.launch { drawerState.close() }
+                        },
+                        modifier = Modifier.padding(horizontal = 12.dp)
+                    )
+
+                    Spacer(modifier = Modifier.weight(1f))
+
+                    // ── Footer ──
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 24.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant
+                    )
+                    Text(
+                        text = "v1.0  ·  Copyright © 2026 Makizz",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier
+                            .padding(horizontal = 24.dp, vertical = 16.dp)
+                    )
                 }
             }
         }
@@ -109,12 +175,21 @@ fun BingoApp() {
 
         NavHost(
             navController = navController, 
-            startDestination = Routes.Cards,
+            startDestination = Routes.Splash,
             enterTransition = { androidx.compose.animation.EnterTransition.None },
             exitTransition = { androidx.compose.animation.ExitTransition.None },
             popEnterTransition = { androidx.compose.animation.EnterTransition.None },
             popExitTransition = { androidx.compose.animation.ExitTransition.None }
         ) {
+            composable(Routes.Splash) {
+                SplashScreen(
+                    onFinished = {
+                        navController.navigate(Routes.Cards) {
+                            popUpTo(Routes.Splash) { inclusive = true }
+                        }
+                    }
+                )
+            }
             composable(Routes.Cards) {
                 CardListScreen(
                     stateFlow = cardsVm.state,
@@ -150,7 +225,7 @@ fun BingoApp() {
                     onSave = { vm.save() },
                     onDelete = { vm.deleteSelected() },
                     onToggleActive = { vm.toggleActive(it) },
-                    onBack = { navController.popBackStack() }
+                    onOpenDrawer = { scope.launch { drawerState.open() } }
                 )
             }
 

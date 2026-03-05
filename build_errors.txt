@@ -1,0 +1,22 @@
+﻿To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.13/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugBuildConfig UP-TO-DATE
+.\gradlew : e: file:///C:/Users/Admin/AndroidStudio
+Projects/BingoCard/app/src/main/java/com/mkz/bingoc
+ard/ui/App.kt:125:92 Unresolved reference 'List'.
+At line:1 char:1
++ .\gradlew app:assembleDebug --no-daemon 2>&1 | 
+Where-Object { $_ -mat ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (e: fi 
+   le:///C:/U...ference 'List'.:String) [], Remot  
+  eException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+e: file:///C:/Users/Admin/AndroidStudioProjects/Bin
+goCard/app/src/main/java/com/mkz/bingocard/ui/App.k
+t:144:92 Unresolved reference 'Star'.
+FAILURE: Build failed with an exception.
+BUILD FAILED in 13s

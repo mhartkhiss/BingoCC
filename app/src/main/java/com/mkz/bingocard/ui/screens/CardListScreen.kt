@@ -1,10 +1,15 @@
 package com.mkz.bingocard.ui.screens
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.graphicsLayer
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -29,7 +34,6 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -44,7 +48,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
 import java.io.File
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Delete
@@ -54,7 +57,7 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.ViewModule
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.Button
@@ -133,12 +136,37 @@ fun CardListScreen(
     var showHistorySheet by remember { mutableStateOf(false) }
     var historyFilterText by remember { mutableStateOf("") }
     var historyShowRemaining by remember { mutableStateOf(false) }
-    var viewMode by remember { mutableStateOf(CardListViewMode.List) }
     var showUndoConfirm by remember { mutableStateOf(false) }
+
+    // --- Animation state for newest called-number chip ---
+    val newestChipScale = remember { Animatable(1f) }
+    val newestChipAlpha = remember { Animatable(1f) }
+    var prevCalledCount by remember { mutableStateOf(state.calledNumbers.size) }
+    val animScope = androidx.compose.runtime.rememberCoroutineScope()
+
+    LaunchedEffect(state.calledNumbers.size) {
+        if (state.calledNumbers.size > prevCalledCount) {
+            // New number was just called – animate for 3 seconds
+            animScope.launch {
+                val cycles = 6          // 6 pulses × 500ms = 3 000ms
+                repeat(cycles) {
+                    newestChipScale.animateTo(1.35f, tween(250))
+                    newestChipScale.animateTo(1f, tween(250))
+                }
+            }
+            animScope.launch {
+                val blinks = 6
+                repeat(blinks) {
+                    newestChipAlpha.animateTo(0.3f, tween(250))
+                    newestChipAlpha.animateTo(1f, tween(250))
+                }
+            }
+        }
+        prevCalledCount = state.calledNumbers.size
+    }
 
     val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
 
-    val listState = rememberLazyListState()
     val gridState = rememberLazyGridState()
     
     var lastCards by remember { mutableStateOf(state.cards) }
@@ -154,11 +182,7 @@ fun CardListScreen(
 
         if (justWon || newWaiting) {
             // Scroll to top since sorted cards place wins/waits first
-            if (viewMode == CardListViewMode.List) {
-                listState.animateScrollToItem(0)
-            } else {
-                gridState.animateScrollToItem(0)
-            }
+            gridState.animateScrollToItem(0)
         }
         lastCards = state.cards
     }
@@ -203,7 +227,7 @@ fun CardListScreen(
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             // Show most recent first (calledNumbers is already DESC from DB)
-                            state.calledNumbers.take(15).forEach { number ->
+                            state.calledNumbers.take(15).forEachIndexed { index, number ->
                                 val letter = when (number) {
                                     in 1..15 -> "B"
                                     in 16..30 -> "I"
@@ -212,9 +236,25 @@ fun CardListScreen(
                                     in 61..75 -> "O"
                                     else -> ""
                                 }
+                                val isNewest = index == 0
+                                val chipModifier = if (isNewest) {
+                                    Modifier
+                                        .graphicsLayer {
+                                            scaleX = newestChipScale.value
+                                            scaleY = newestChipScale.value
+                                            alpha = newestChipAlpha.value
+                                        }
+                                        .shadow(
+                                            elevation = if (newestChipScale.value > 1.05f) 12.dp else 0.dp,
+                                            shape = MaterialTheme.shapes.small,
+                                            spotColor = MaterialTheme.colorScheme.primary,
+                                            ambientColor = MaterialTheme.colorScheme.primary
+                                        )
+                                } else Modifier
                                 FilterChip(
                                     selected = false,
                                     onClick = { showHistorySheet = true },
+                                    modifier = chipModifier,
                                     label = {
                                         Text(
                                             text = "$letter$number",
@@ -223,7 +263,10 @@ fun CardListScreen(
                                         )
                                     },
                                     colors = FilterChipDefaults.filterChipColors(
-                                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                                        containerColor = if (isNewest && newestChipScale.value > 1.05f)
+                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+                                        else
+                                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
                                     )
                                 )
                             }
@@ -236,20 +279,6 @@ fun CardListScreen(
                     }
                 },
                 actions = {
-                    IconButton(
-                        onClick = {
-                            viewMode = when (viewMode) {
-                                CardListViewMode.List -> CardListViewMode.Grid
-                                CardListViewMode.Grid -> CardListViewMode.List
-                            }
-                        }
-                    ) {
-                        val icon = when (viewMode) {
-                            CardListViewMode.List -> Icons.Default.ViewModule
-                            CardListViewMode.Grid -> Icons.AutoMirrored.Filled.ViewList
-                        }
-                        Icon(imageVector = icon, contentDescription = "Toggle view")
-                    }
                     IconButton(onClick = { showAddSheet = true }) {
                         Icon(imageVector = Icons.Default.Add, contentDescription = "Add Card")
                     }
@@ -343,7 +372,7 @@ fun CardListScreen(
                         val emoji = when {
                             typedValue == null || typedValue !in 1..75 || typedValue in state.calledNumbers -> ""
                             isWinningNumber -> "🎉"
-                            isMatchingNumber -> "😆"
+                            isMatchingNumber -> "🤍"
                             else -> "☹️"
                         }
 
@@ -470,119 +499,38 @@ fun CardListScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
 
-            if (viewMode == CardListViewMode.List) {
-                LazyColumn(
-                    state = listState,
+            if (state.isLoading) {
+                Box(
                     modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    contentAlignment = Alignment.Center
                 ) {
-                    items(state.cards, key = { it.cardId }) { item ->
-                        val base = Color(item.colorArgb.toInt())
-                        val container = if (item.isWin) base.copy(alpha = 0.22f) else base.copy(alpha = 0.10f)
-                        val badgeColor = when {
-                            item.isWin -> Color(0xFF2E7D32)
-                            item.isNearWin -> Color(0xFFF57C00)
-                            else -> Color.Transparent
-                        }
-                        val borderColor = base.copy(alpha = 0.90f)
-
-                        Box {
-                            ElevatedCard(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(CardDefaults.elevatedShape)
-                                    .background(Color.Transparent)
-                                    .combinedClickable(
-                                        enabled = true,
-                                        onClick = { if (item.isActive) onCardClick(item.cardId) },
-                                        onLongClick = { cardOptionsId = item.cardId }
-                                    )
-                                    .alpha(if (item.isActive) 1f else 0.4f),
-                                colors = CardDefaults.elevatedCardColors(containerColor = container),
-                                elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
-                            ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(Color.Transparent)
-                                        .padding(20.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = item.name,
-                                            style = MaterialTheme.typography.titleLarge,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        if (item.winCount > 0) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .background(MaterialTheme.colorScheme.error, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-                                                    .padding(horizontal = 10.dp, vertical = 4.dp),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(
-                                                    text = "WIN: ${item.winCount}",
-                                                    color = MaterialTheme.colorScheme.onError,
-                                                    style = MaterialTheme.typography.labelMedium,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                            }
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                        }
-                                        Switch(
-                                            checked = item.isActive,
-                                            onCheckedChange = { onToggleActive(item.cardId, it) },
-                                            modifier = Modifier.scale(0.8f)
-                                        )
-                                    }
-                                    if (item.isWin) {
-                                        Spacer(modifier = Modifier.padding(top = 4.dp))
-                                        SlidingWinnerBanner()
-                                    }
-                                    val status = when {
-                                        item.isWin -> "PALDOOO!"
-                                        item.isNearWin -> "${item.waitingCellIndexes.size} waiting"
-                                        else -> null
-                                    }
-                                    if (status != null) {
-                                        Text(
-                                            text = status,
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = Color.White,
-                                            modifier = Modifier
-                                                .padding(top = 12.dp)
-                                                .background(badgeColor, shape = MaterialTheme.shapes.small)
-                                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.padding(top = 10.dp))
-                                    BingoCardTable(
-                                        item = item,
-                                        cellSize = 34.dp
-                                    )
-                                }
-                            }
-
-                            androidx.compose.foundation.Canvas(
-                                modifier = Modifier
-                                    .matchParentSize()
-                                    .alpha(if (item.isActive) 1f else 0.4f)
-                            ) {
-                                drawRoundRect(
-                                    color = borderColor,
-                                    style = Stroke(width = 5f),
-                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(28f, 28f)
-                                )
-                            }
-
-                            if (item.isWin) {
-                                WinConfettiOverlay(modifier = Modifier.matchParentSize(), seed = item.cardId)
-                            }
-                        }
+                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                }
+            } else if (state.cards.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Text(
+                            text = "🎱",
+                            fontSize = androidx.compose.ui.unit.TextUnit(64f, androidx.compose.ui.unit.TextUnitType.Sp)
+                        )
+                        Text(
+                            text = "No bingo cards yet",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                        )
+                        Text(
+                            text = "Tap the  ＋  button at the top right\nto add your first card!",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            lineHeight = androidx.compose.ui.unit.TextUnit(22f, androidx.compose.ui.unit.TextUnitType.Sp)
+                        )
                     }
                 }
             } else {
@@ -1021,10 +969,7 @@ fun CardListScreen(
     }
 }
 
-private enum class CardListViewMode {
-    List,
-    Grid
-}
+
 
 @Composable
 private fun SlidingWinnerBanner() {

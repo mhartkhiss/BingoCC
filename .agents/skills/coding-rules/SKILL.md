@@ -15,4 +15,3 @@ Keep coding style strictly modular, maintainable, and aligned with user preferen
 - **Kotlin File Limits**: Limit any single file (including Compose UIs or Services) to strictly under 500 lines.
 - **Resource Constraints**: No hardcoded strings, colors, or dimens in Kotlin files. Use `strings.xml`, `colors.xml`, `dimens.xml`, etc. Keep shared constants in `Constants.kt`.
 - **Self-Correction & Memory**: Ensure build errors from missing imports are corrected by adding imports and retaining context across attempts.
-- **Verification**: Run `.\gradlew app:assembleDebug --no-daemon 2>&1` from the project root to verify the build. Output streams directly to the terminal.
