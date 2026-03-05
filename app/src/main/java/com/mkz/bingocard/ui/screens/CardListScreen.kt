@@ -1031,12 +1031,17 @@ private fun CardListBottomBar(
             ) {
                 IconButton(
                     onClick = onRequestReset,
+                    enabled = state.calledNumbers.isNotEmpty(),
                     modifier = Modifier.background(Color(0xFFFF9800).copy(alpha = 0.15f), shape = androidx.compose.foundation.shape.CircleShape)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Refresh,
                         contentDescription = "Reset Round",
-                        tint = Color(0xFFFF9800)
+                        tint = if (state.calledNumbers.isNotEmpty()) {
+                            Color(0xFFFF9800)
+                        } else {
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                        }
                     )
                 }
 

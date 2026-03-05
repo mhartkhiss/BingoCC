@@ -23,12 +23,12 @@ object PresetPatternSeeder {
         run {
             var m = 0L
             for (i in 0 until BingoRules.GRID_SIZE) m = PatternMask.setBit(m, i, i)
-            presets.add(PatternEntity(name = "Diagonal \\u2198", isPreset = true, mask = m))
+            presets.add(PatternEntity(name = "Diagonal Down-Right", isPreset = true, mask = m))
         }
         run {
             var m = 0L
             for (i in 0 until BingoRules.GRID_SIZE) m = PatternMask.setBit(m, i, BingoRules.GRID_SIZE - 1 - i)
-            presets.add(PatternEntity(name = "Diagonal \\u2199", isPreset = true, mask = m))
+            presets.add(PatternEntity(name = "Diagonal Down-Left", isPreset = true, mask = m))
         }
 
         // Blackout (all except FREE is naturally satisfied if included)

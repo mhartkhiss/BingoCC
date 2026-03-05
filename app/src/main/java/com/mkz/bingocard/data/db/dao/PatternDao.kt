@@ -23,4 +23,7 @@ interface PatternDao {
 
     @Query("SELECT COUNT(*) FROM patterns")
     suspend fun countPatterns(): Int
+
+    @Query("UPDATE patterns SET name = :newName WHERE isPreset = 1 AND name = :oldName")
+    suspend fun renamePresetByName(oldName: String, newName: String): Int
 }

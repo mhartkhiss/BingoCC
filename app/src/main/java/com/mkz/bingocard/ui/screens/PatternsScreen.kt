@@ -223,51 +223,66 @@ fun PatternsScreen(
                 }
             }
 
-            if (filteredPatterns.isNotEmpty()) {
-                ElevatedCard(
+            ElevatedCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            ) {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f)
+                        .padding(cardPadding),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(cardPadding),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                        Text(
+                            "Pattern List",
+                            style = if (isNarrow) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Button(
+                            onClick = {
+                                previousSelectionBeforeCreate = state.selectedId
+                                onCreate()
+                                isEditingMode = false
+                                showPatternEditorModal = true
+                            }
+                        ) {
+                            Text("New Pattern")
+                        }
+                    }
+                    TabRow(selectedTabIndex = listFilterTab.ordinal) {
+                        Tab(
+                            selected = listFilterTab == PatternFilterTab.PRESETS,
+                            onClick = { listFilterTab = PatternFilterTab.PRESETS },
+                            text = { Text("Presets") }
+                        )
+                        Tab(
+                            selected = listFilterTab == PatternFilterTab.CUSTOM,
+                            onClick = { listFilterTab = PatternFilterTab.CUSTOM },
+                            text = { Text("Custom") }
+                        )
+                    }
+
+                    if (filteredPatterns.isEmpty()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(vertical = 16.dp),
+                            verticalArrangement = Arrangement.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
-                                "Pattern List",
-                                style = if (isNarrow) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Button(
-                                onClick = {
-                                    previousSelectionBeforeCreate = state.selectedId
-                                    onCreate()
-                                    isEditingMode = false
-                                    showPatternEditorModal = true
-                                }
-                            ) {
-                                Text("New Pattern")
-                            }
-                        }
-                        TabRow(selectedTabIndex = listFilterTab.ordinal) {
-                            Tab(
-                                selected = listFilterTab == PatternFilterTab.PRESETS,
-                                onClick = { listFilterTab = PatternFilterTab.PRESETS },
-                                text = { Text("Presets") }
-                            )
-                            Tab(
-                                selected = listFilterTab == PatternFilterTab.CUSTOM,
-                                onClick = { listFilterTab = PatternFilterTab.CUSTOM },
-                                text = { Text("Custom") }
+                                text = if (listFilterTab == PatternFilterTab.PRESETS) "No preset patterns." else "No custom patterns yet.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+                    } else {
                         LazyColumn(
                             modifier = Modifier.fillMaxWidth(),
                             verticalArrangement = Arrangement.spacedBy(if (isNarrow) 6.dp else 8.dp)
@@ -326,26 +341,6 @@ fun PatternsScreen(
                                 }
                             }
                         }
-                    }
-                }
-            } else {
-                ElevatedCard(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(cardPadding),
-                        verticalArrangement = Arrangement.Center,
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = if (listFilterTab == PatternFilterTab.PRESETS) "No preset patterns." else "No custom patterns yet.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
                 }
             }

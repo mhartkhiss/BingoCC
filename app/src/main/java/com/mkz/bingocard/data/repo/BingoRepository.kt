@@ -11,7 +11,10 @@ import com.mkz.bingocard.data.db.entities.CalledNumberStatEntity
 import com.mkz.bingocard.data.db.entities.CardEntity
 import com.mkz.bingocard.data.db.entities.CellEntity
 import com.mkz.bingocard.data.db.entities.PatternEntity
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 
 class BingoRepository(
     private val cardDao: CardDao,
@@ -125,4 +128,21 @@ class BingoRepository(
     suspend fun clearCalledNumberStats() = calledNumberStatsDao.clearStats()
 
     suspend fun countPatterns(): Int = patternDao.countPatterns()
+
+    suspend fun renamePresetByName(oldName: String, newName: String): Int =
+        patternDao.renamePresetByName(oldName, newName)
+
+    suspend fun warmupForStartup() = withContext(Dispatchers.IO) {
+        // Prime Room queries/observers for initial navigation targets.
+        val cards = observeCards().first()
+        observePatterns().first()
+        observeActivePatterns().first()
+        observeCalledNumbers().first()
+        observeCalledNumberStats().first()
+
+        // Preload card cell payloads so the cards grid can render without cold reads.
+        cards.forEach { card ->
+            getCells(card.id)
+        }
+    }
 }

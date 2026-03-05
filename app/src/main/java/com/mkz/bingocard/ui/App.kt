@@ -93,6 +93,7 @@ fun BingoApp() {
 
     LaunchedEffect(Unit) {
         SeedRepository.seedPresetsIfNeeded(repo)
+        repo.warmupForStartup()
     }
 
     val navController = rememberNavController()
