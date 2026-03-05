@@ -9,8 +9,6 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -55,7 +53,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.HorizontalDivider
@@ -123,7 +120,6 @@ fun BingoApp() {
     val scope = rememberCoroutineScope()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
-    var historyRequestKey by remember { mutableIntStateOf(0) }
 
     BackHandler(enabled = drawerState.isOpen) {
         scope.launch { drawerState.close() }
@@ -169,31 +165,6 @@ fun BingoApp() {
                         label = { Text(stringResource(id = R.string.sidebar_cards)) },
                         selected = currentRoute == Routes.Cards,
                         onClick = {
-                            if (currentRoute != Routes.Cards) {
-                                navController.navigate(Routes.Cards) {
-                                    popUpTo(navController.graph.findStartDestination().id) {
-                                        saveState = true
-                                    }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                            }
-                            scope.launch { drawerState.close() }
-                        },
-                        modifier = Modifier.padding(horizontal = 12.dp)
-                    )
-
-                    NavigationDrawerItem(
-                        icon = {
-                            Icon(
-                                imageVector = Icons.Default.History,
-                                contentDescription = null
-                            )
-                        },
-                        label = { Text(stringResource(id = R.string.sidebar_history)) },
-                        selected = false,
-                        onClick = {
-                            historyRequestKey++
                             if (currentRoute != Routes.Cards) {
                                 navController.navigate(Routes.Cards) {
                                     popUpTo(navController.graph.findStartDestination().id) {
@@ -272,7 +243,6 @@ fun BingoApp() {
                 }
                 composable(Routes.Cards) {
                     CardListScreen(
-                        openHistoryRequestKey = historyRequestKey,
                         stateFlow = cardsVm.state,
                         onCardClick = { navController.navigate(Routes.cardDetail(it)) },
                         onEditCard = { cardId ->

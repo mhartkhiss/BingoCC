@@ -81,10 +81,15 @@ class BingoRepository(
     }
 
     @androidx.room.Transaction
-    suspend fun resetAllMarks(cardsWithWins: Map<Long, Int>) {
-        cardsWithWins.forEach { (cardId, wins) ->
+    suspend fun resetAllMarks(activeWins: Map<Long, Int>, disabledWins: Map<Long, Int>) {
+        activeWins.forEach { (cardId, wins) ->
             if (wins > 0) {
                 cardDao.addHistoricalWins(cardId, wins)
+            }
+        }
+        disabledWins.forEach { (cardId, wins) ->
+            if (wins > 0) {
+                cardDao.addHistoricalWinsDisabled(cardId, wins)
             }
         }
         cardDao.resetAllMarks()

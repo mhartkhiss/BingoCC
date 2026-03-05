@@ -25,8 +25,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -41,6 +39,8 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.unit.dp
 import com.mkz.bingocard.domain.BingoRules
+import com.mkz.bingocard.ui.components.AppActionDialog
+import com.mkz.bingocard.ui.components.AppDialogType
 import com.mkz.bingocard.ui.vm.CardDetailUiState
 import kotlinx.coroutines.flow.StateFlow
 
@@ -84,24 +84,17 @@ fun CardDetailScreen(
         }
     ) { innerPadding ->
         if (showDeleteConfirm) {
-            AlertDialog(
-                onDismissRequest = { showDeleteConfirm = false },
-                title = { Text("Delete Card") },
-                text = { Text("Are you sure you want to delete this card?") },
-                confirmButton = {
-                    TextButton(onClick = { 
-                        showDeleteConfirm = false
-                        onDelete()
-                        onBack() 
-                    }) {
-                        Text("Delete", color = MaterialTheme.colorScheme.error)
-                    }
+            AppActionDialog(
+                title = "Delete Card",
+                message = "Are you sure you want to delete this card?",
+                confirmLabel = "Delete",
+                type = AppDialogType.DESTRUCTIVE,
+                onConfirm = {
+                    showDeleteConfirm = false
+                    onDelete()
+                    onBack()
                 },
-                dismissButton = {
-                    TextButton(onClick = { showDeleteConfirm = false }) {
-                        Text("Cancel")
-                    }
-                }
+                onDismiss = { showDeleteConfirm = false }
             )
         }
         

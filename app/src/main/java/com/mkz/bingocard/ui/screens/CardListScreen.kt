@@ -50,7 +50,6 @@ import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.Refresh
@@ -74,7 +73,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
 import androidx.compose.ui.window.Dialog
@@ -103,6 +101,11 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.painterResource
+import com.mkz.bingocard.R
+import com.mkz.bingocard.ui.components.AppActionDialog
+import com.mkz.bingocard.ui.components.AppDialogType
 import com.mkz.bingocard.domain.BingoRules
 import com.mkz.bingocard.ui.vm.CardListItemUi
 import com.mkz.bingocard.ui.vm.CardListUiState
@@ -113,7 +116,6 @@ import kotlinx.coroutines.flow.StateFlow
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CardListScreen(
-    openHistoryRequestKey: Int = 0,
     stateFlow: StateFlow<CardListUiState>,
     onCardClick: (Long) -> Unit,
     onEditCard: (Long) -> Unit,
@@ -137,14 +139,6 @@ fun CardListScreen(
     var historyTab by remember { mutableStateOf(HistoryTab.CALLED) }
     var showResetStatsConfirm by remember { mutableStateOf(false) }
     var showUndoConfirm by remember { mutableStateOf(false) }
-
-    LaunchedEffect(openHistoryRequestKey) {
-        if (openHistoryRequestKey > 0) {
-            showHistorySheet = true
-            historyFilterText = ""
-            historyTab = HistoryTab.CALLED
-        }
-    }
 
     // --- Animation state for newest called-number chip ---
     val newestChipScale = remember { Animatable(1f) }
@@ -196,12 +190,12 @@ fun CardListScreen(
     var lastCards by remember { mutableStateOf(state.cards) }
 
     LaunchedEffect(state.cards) {
-        val oldWinIds = lastCards.filter { it.isWin }.map { it.cardId }.toSet()
-        val newWins = state.cards.filter { it.isWin }.map { it.cardId }
+        val oldWinIds = lastCards.filter { it.isActive && it.isWin }.map { it.cardId }.toSet()
+        val newWins = state.cards.filter { it.isActive && it.isWin }.map { it.cardId }
         val justWon = newWins.any { it !in oldWinIds }
 
-        val oldWaitIds = lastCards.filter { it.isNearWin }.map { it.cardId }.toSet()
-        val newWaits = state.cards.filter { it.isNearWin }.map { it.cardId }
+        val oldWaitIds = lastCards.filter { it.isActive && it.isNearWin }.map { it.cardId }.toSet()
+        val newWaits = state.cards.filter { it.isActive && it.isNearWin }.map { it.cardId }
         val newWaiting = newWaits.any { it !in oldWaitIds }
 
         if (justWon || newWaiting) {
@@ -292,6 +286,14 @@ fun CardListScreen(
                     }
                 },
                 actions = {
+                    if (state.calledNumbers.isEmpty()) {
+                        IconButton(onClick = { showHistorySheet = true }) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_history_doc_sample),
+                                contentDescription = stringResource(id = R.string.sidebar_history)
+                            )
+                        }
+                    }
                     IconButton(
                         onClick = onManualCreate,
                         modifier = Modifier
@@ -324,24 +326,19 @@ fun CardListScreen(
         }
     ) { innerPadding ->
         if (showAlreadyCalledDialog) {
-            AlertDialog(
-                onDismissRequest = {
+            AppActionDialog(
+                title = "Already called",
+                message = "${alreadyCalledNumber ?: "That number"} is already in the called history.",
+                confirmLabel = "OK",
+                dismissLabel = null,
+                type = AppDialogType.WARNING,
+                onConfirm = {
                     showAlreadyCalledDialog = false
                     alreadyCalledNumber = null
                 },
-                title = { Text("Already called") },
-                text = {
-                    Text("${alreadyCalledNumber ?: "That number"} is already in the called history.")
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            showAlreadyCalledDialog = false
-                            alreadyCalledNumber = null
-                        }
-                    ) {
-                        Text("OK")
-                    }
+                onDismiss = {
+                    showAlreadyCalledDialog = false
+                    alreadyCalledNumber = null
                 }
             )
         }
@@ -461,7 +458,7 @@ fun CardListScreen(
                                                 }
                                             }
                                         }
-                                        if (item.winCount > 0) {
+                                        if (item.activeWinCount > 0) {
                                             Box(
                                                 modifier = Modifier
                                                     .background(MaterialTheme.colorScheme.error, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
@@ -469,8 +466,24 @@ fun CardListScreen(
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 Text(
-                                                    text = "WIN: ${item.winCount}",
+                                                    text = "WIN: ${item.activeWinCount}",
                                                     color = MaterialTheme.colorScheme.onError,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                        }
+                                        if (item.disabledWinCount > 0) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .background(Color(0xFF9E9E9E), shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                                                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = "WIN(D): ${item.disabledWinCount}",
+                                                    color = Color.White,
                                                     style = MaterialTheme.typography.labelSmall,
                                                     fontWeight = FontWeight.Bold
                                                 )
@@ -483,7 +496,7 @@ fun CardListScreen(
                                             modifier = Modifier.scale(0.7f)
                                         )
                                     }
-                                    if (item.isWin) {
+                                    if (item.isActive && item.isWin) {
                                         SlidingWinnerBanner()
                                     }
                                     BingoCardTable(item = item, cellSize = 44.dp)
@@ -502,7 +515,7 @@ fun CardListScreen(
                                 )
                             }
 
-                            if (item.isWin) {
+                            if (item.isActive && item.isWin) {
                                 WinConfettiOverlay(modifier = Modifier.matchParentSize(), seed = item.cardId)
                             }
                         }
@@ -853,63 +866,42 @@ fun CardListScreen(
             }
 
             if (cardToDelete != null) {
-                AlertDialog(
-                    onDismissRequest = { cardToDelete = null },
-                    title = { Text("Delete Card") },
-                    text = { Text("Are you sure you want to delete this card?") },
-                    confirmButton = {
-                        TextButton(onClick = { 
-                            onDeleteCard(cardToDelete!!)
-                            cardToDelete = null 
-                        }) {
-                            Text("Delete", color = MaterialTheme.colorScheme.error)
-                        }
+                AppActionDialog(
+                    title = "Delete Card",
+                    message = "Are you sure you want to delete this card?",
+                    confirmLabel = "Delete",
+                    type = AppDialogType.DESTRUCTIVE,
+                    onConfirm = {
+                        onDeleteCard(cardToDelete!!)
+                        cardToDelete = null
                     },
-                    dismissButton = {
-                        TextButton(onClick = { cardToDelete = null }) {
-                            Text("Cancel")
-                        }
-                    }
+                    onDismiss = { cardToDelete = null }
                 )
             }
             if (showResetConfirm) {
-                AlertDialog(
-                    onDismissRequest = { showResetConfirm = false },
-                    title = { Text("Reset All Marks") },
-                    text = { Text("Are you sure you want to completely clear the marks on all your Bingo cards?") },
-                    confirmButton = {
-                        TextButton(onClick = { 
-                            onResetAll()
-                            showResetConfirm = false 
-                        }) {
-                            Text("Reset", color = MaterialTheme.colorScheme.error)
-                        }
+                AppActionDialog(
+                    title = "Reset Round",
+                    message = "Are you sure you want to reset this round and clear marks on all your Bingo cards?",
+                    confirmLabel = "Reset Round",
+                    type = AppDialogType.WARNING,
+                    onConfirm = {
+                        onResetAll()
+                        showResetConfirm = false
                     },
-                    dismissButton = {
-                        TextButton(onClick = { showResetConfirm = false }) {
-                            Text("Cancel")
-                        }
-                    }
+                    onDismiss = { showResetConfirm = false }
                 )
             }
             if (showResetStatsConfirm) {
-                AlertDialog(
-                    onDismissRequest = { showResetStatsConfirm = false },
-                    title = { Text("Reset Number Stats") },
-                    text = { Text("Clear all called-number stats counts?") },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            onResetCallStats()
-                            showResetStatsConfirm = false
-                        }) {
-                            Text("Reset", color = MaterialTheme.colorScheme.error)
-                        }
+                AppActionDialog(
+                    title = "Reset Number Stats",
+                    message = "Clear all called-number stats counts?",
+                    confirmLabel = "Reset Stats",
+                    type = AppDialogType.WARNING,
+                    onConfirm = {
+                        onResetCallStats()
+                        showResetStatsConfirm = false
                     },
-                    dismissButton = {
-                        TextButton(onClick = { showResetStatsConfirm = false }) {
-                            Text("Cancel")
-                        }
-                    }
+                    onDismiss = { showResetStatsConfirm = false }
                 )
             }
             if (showUndoConfirm && state.calledNumbers.isNotEmpty()) {
@@ -922,25 +914,16 @@ fun CardListScreen(
                     in 61..75 -> "O"
                     else -> ""
                 }
-                AlertDialog(
-                    onDismissRequest = { showUndoConfirm = false },
-                    title = { Text("Undo Last Call") },
-                    text = {
-                        Text("Remove $lastLetter$lastNumber from called numbers and unmark it on all cards?")
+                AppActionDialog(
+                    title = "Undo Last Call",
+                    message = "Remove $lastLetter$lastNumber from called numbers and unmark it on all cards?",
+                    confirmLabel = "Undo",
+                    type = AppDialogType.WARNING,
+                    onConfirm = {
+                        onUncallNumber(lastNumber)
+                        showUndoConfirm = false
                     },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            onUncallNumber(lastNumber)
-                            showUndoConfirm = false
-                        }) {
-                            Text("Undo", color = MaterialTheme.colorScheme.error)
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showUndoConfirm = false }) {
-                            Text("Cancel")
-                        }
-                    }
+                    onDismiss = { showUndoConfirm = false }
                 )
             }
         }
@@ -1052,7 +1035,7 @@ private fun CardListBottomBar(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Refresh,
-                        contentDescription = "Reset All Marks",
+                        contentDescription = "Reset Round",
                         tint = Color(0xFFFF9800)
                     )
                 }
@@ -1268,7 +1251,7 @@ private fun BingoCardTable(
     val shape = MaterialTheme.shapes.small
     val winBorder = Color(0xFF2E7D32)
     val waitBorder = Color(0xFFF57C00)
-    val winBg = Color(0xFFB7F3C3)
+    val winBg = Color(0xFF4CAF50)
 
     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(
@@ -1303,6 +1286,7 @@ private fun BingoCardTable(
 
                     val textColor = when {
                         isFree -> MaterialTheme.colorScheme.primary
+                        hasWin -> Color.White
                         marked -> MaterialTheme.colorScheme.onPrimary
                         else -> MaterialTheme.colorScheme.onSurface
                     }

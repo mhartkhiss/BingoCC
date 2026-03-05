@@ -45,7 +45,7 @@ interface CardDao {
     @Update
     suspend fun updateCell(cell: CellEntity)
 
-    @Query("UPDATE cells SET isMarked = :isMarked WHERE value = :value AND cardId IN (SELECT id FROM cards WHERE isActive = 1)")
+    @Query("UPDATE cells SET isMarked = :isMarked WHERE value = :value")
     suspend fun setMarkedByValue(value: Int, isMarked: Boolean)
 
     @Query("UPDATE cells SET isMarked = :isMarked WHERE cardId = :cardId AND value = :value")
@@ -59,6 +59,9 @@ interface CardDao {
 
     @Query("UPDATE cards SET historicalWins = historicalWins + :addedWins WHERE id = :cardId")
     suspend fun addHistoricalWins(cardId: Long, addedWins: Int)
+
+    @Query("UPDATE cards SET historicalWinsDisabled = historicalWinsDisabled + :addedWins WHERE id = :cardId")
+    suspend fun addHistoricalWinsDisabled(cardId: Long, addedWins: Int)
 
     @Query("UPDATE cards SET isActive = :isActive WHERE id = :cardId")
     suspend fun setCardActive(cardId: Long, isActive: Boolean)
