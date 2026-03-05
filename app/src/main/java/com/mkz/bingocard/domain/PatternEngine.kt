@@ -13,7 +13,8 @@ object PatternEngine {
 
     data class PatternHighlights(
         val winningCellIndexes: Set<Int>,
-        val waitingCellIndexes: Set<Int>
+        val waitingCellIndexes: Set<Int>,
+        val winCount: Int
     )
 
     fun evaluatePatterns(
@@ -58,6 +59,7 @@ object PatternEngine {
 
         val winning = LinkedHashSet<Int>()
         val waiting = LinkedHashSet<Int>()
+        var winCount = 0
 
         for (pattern in patterns) {
             val expandedMasks = expandToMasks(pattern)
@@ -66,6 +68,9 @@ object PatternEngine {
 
             for (mask in expandedMasks) {
                 val missing = missingCount(mask, marked)
+                if (missing == 0) {
+                    winCount++
+                }
                 when {
                     missing < bestMissing -> {
                         bestMissing = missing
@@ -97,7 +102,8 @@ object PatternEngine {
 
         return PatternHighlights(
             winningCellIndexes = winning,
-            waitingCellIndexes = waiting
+            waitingCellIndexes = waiting,
+            winCount = winCount
         )
     }
 

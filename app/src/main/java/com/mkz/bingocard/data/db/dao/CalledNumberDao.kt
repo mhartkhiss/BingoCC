@@ -15,6 +15,9 @@ interface CalledNumberDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertCalledNumber(called: CalledNumberEntity)
 
+    @Query("DELETE FROM called_numbers WHERE value = :value")
+    suspend fun deleteByValue(value: Int)
+
     @Query("DELETE FROM called_numbers")
     suspend fun clearCalledNumbers()
 }

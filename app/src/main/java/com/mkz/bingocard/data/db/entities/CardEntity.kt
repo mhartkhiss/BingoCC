@@ -10,5 +10,9 @@ data class CardEntity(
     val name: String,
     val createdAtEpochMs: Long,
     val updatedAtEpochMs: Long,
-    val colorArgb: Long
+    val colorArgb: Long,
+    @androidx.room.ColumnInfo(defaultValue = "0")
+    val historicalWins: Int = 0,
+    @androidx.room.ColumnInfo(defaultValue = "1")
+    val isActive: Boolean = true
 )

@@ -8,52 +8,78 @@ import android.provider.MediaStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.mkz.bingocard.BuildConfig
 import com.mkz.bingocard.data.db.entities.CardEntity
 import com.mkz.bingocard.data.db.entities.CellEntity
 import com.mkz.bingocard.data.repo.BingoRepository
-import com.mkz.bingocard.data.repo.SettingsRepository
 import com.mkz.bingocard.domain.BingoRules
-import com.google.ai.client.generativeai.GenerativeModel
-import com.google.ai.client.generativeai.type.content
+import com.mkz.bingocard.vision.GitHubModelsClient
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlin.random.Random
-import org.json.JSONArray
+
 import org.json.JSONException
+import org.json.JSONObject
+import kotlin.random.Random
 
 data class ScanUiState(
     val imageUri: Uri? = null,
     val isProcessing: Boolean = false,
     val errorMessage: String? = null,
     val grid: Array<Int?> = Array(BingoRules.GRID_SIZE * BingoRules.GRID_SIZE) { null },
-    val cardColor: Long? = null
+    val cardColor: Long? = null,
+    val cardName: String = "",
+    val editingCardId: Long? = null
 )
 
-class ScanViewModel(private val repo: BingoRepository, private val settingsRepo: SettingsRepository) : ViewModel() {
+class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
+
+    companion object {
+        private const val MAX_DIMENSION = 1024
+        private val GITHUB_TOKENS: List<String> =
+            BuildConfig.GITHUB_TOKENS.split(",").map { it.trim() }.filter { it.isNotBlank() }
+    }
+
     private val _state = MutableStateFlow(ScanUiState())
     val state: StateFlow<ScanUiState> = _state
 
-    fun onImagePicked(uri: Uri) {
-        _state.value = _state.value.copy(imageUri = uri, isProcessing = true, errorMessage = null)
+    /** Stores the image URI for the crop screen — no processing yet. */
+    fun setImage(uri: Uri) {
+        _state.value = ScanUiState(imageUri = uri)
+    }
+
+    /**
+     * Called after the user crops the image. Loads the bitmap, applies the
+     * crop, downscales to ≤1 MB JPEG, and sends it to GitHub Models for analysis.
+     * @param left, top, right, bottom — normalized crop coordinates (0.0–1.0)
+     */
+    fun analyzeCroppedImage(left: Float, top: Float, right: Float, bottom: Float) {
+        val uri = _state.value.imageUri ?: return
+        _state.value = _state.value.copy(isProcessing = true, errorMessage = null)
+
         viewModelScope.launch {
             try {
-                val bitmap = getBitmapFromUri(uri)
+                var bitmap = getBitmapFromUri(uri)
                 if (bitmap == null) {
-                     _state.value = _state.value.copy(isProcessing = false, errorMessage = "Failed to open image")
-                     return@launch
-                }
-
-                val apiKeys = settingsRepo.getApiKeys()
-                if (apiKeys.isEmpty()) {
-                    _state.value = _state.value.copy(isProcessing = false, errorMessage = "No API keys configured. Please add one in Settings.")
+                    _state.value = _state.value.copy(isProcessing = false, errorMessage = "Failed to open image")
                     return@launch
                 }
+
+                // Apply crop
+                val cropX = (left * bitmap.width).toInt().coerceIn(0, bitmap.width)
+                val cropY = (top * bitmap.height).toInt().coerceIn(0, bitmap.height)
+                val cropW = ((right - left) * bitmap.width).toInt().coerceIn(1, bitmap.width - cropX)
+                val cropH = ((bottom - top) * bitmap.height).toInt().coerceIn(1, bitmap.height - cropY)
+                bitmap = Bitmap.createBitmap(bitmap, cropX, cropY, cropW, cropH)
+
+                // Downscale to reduce upload time and token usage
+                bitmap = downscaleBitmap(bitmap)
 
                 val prompt = """
                     This is an image of a Bingo ticket/card.
                     1. Extract the 5x5 grid of numbers. Use 'null' exactly in the 13th spot (index 12) for the FREE space.
-                    2. Determine the dominant background color of the physical card (e.g., if it's a red card, blue card, etc.).
+                    2. Determine the border/edge color or the BINGO text color of the physical bingo card (the color of the card's outer border or frame, not the background or numbers).
                     Return ONLY a JSON object with this exact structure:
                     {
                       "grid": [25 integers/nulls],
@@ -66,33 +92,25 @@ class ScanViewModel(private val repo: BingoRepository, private val settingsRepo:
                 var mappedGrid: Array<Int?>? = null
                 var mappedColor: Long? = null
 
-                for (apiKey in apiKeys) {
+                for (token in GITHUB_TOKENS) {
                     try {
-                        val generativeModel = GenerativeModel(
-                            modelName = "gemini-flash-lite-latest", // or gemini-2.5-flash
-                            apiKey = apiKey
-                        )
+                        val respText = GitHubModelsClient.analyzeImage(
+                            token = token,
+                            bitmap = bitmap,
+                            prompt = prompt
+                        ).trim()
 
-                        val response = generativeModel.generateContent(
-                            content {
-                                image(bitmap)
-                                text(prompt)
-                            }
-                        )
-
-                        val respText = response.text?.trim() ?: "{}"
-                        val result = parseGeminiResponse(respText)
+                        val result = parseResponse(respText)
                         if (result != null) {
                             mappedGrid = result.first
                             mappedColor = result.second
-                            break // Success! Exit the retry loop
+                            break
                         } else {
-                            lastError = IllegalStateException("Failed to parse Gemini JSON response")
+                            lastError = IllegalStateException("Failed to parse AI response")
                         }
                     } catch (t: Throwable) {
                         t.printStackTrace()
                         lastError = t
-                        // If it fails, we just continue to the next key
                     }
                 }
 
@@ -104,27 +122,106 @@ class ScanViewModel(private val repo: BingoRepository, private val settingsRepo:
                         errorMessage = null
                     )
                 } else {
-                    _state.value = _state.value.copy(
-                        isProcessing = false, 
-                        errorMessage = lastError?.localizedMessage ?: "All API keys failed"
-                    )
+                    val errorMsg = when (lastError) {
+                        is kotlinx.coroutines.TimeoutCancellationException ->
+                            "Request timed out. Please try again."
+                        else ->
+                            lastError?.localizedMessage ?: "All API keys failed"
+                    }
+                    _state.value = _state.value.copy(isProcessing = false, errorMessage = errorMsg)
                 }
             } catch (t: Throwable) {
                 t.printStackTrace()
-                _state.value = _state.value.copy(isProcessing = false, errorMessage = t.localizedMessage ?: "Unexpected error parsing image")
+                _state.value = _state.value.copy(
+                    isProcessing = false,
+                    errorMessage = t.localizedMessage ?: "Unexpected error"
+                )
             }
         }
     }
 
+    /**
+     * Downscales the bitmap so the longest side is at most [MAX_DIMENSION].
+     */
+    private fun downscaleBitmap(bitmap: Bitmap): Bitmap {
+        val w = bitmap.width
+        val h = bitmap.height
+        val longest = maxOf(w, h)
+        if (longest <= MAX_DIMENSION) return bitmap
+
+        val scale = MAX_DIMENSION.toFloat() / longest
+        val newW = (w * scale).toInt().coerceAtLeast(1)
+        val newH = (h * scale).toInt().coerceAtLeast(1)
+        return Bitmap.createScaledBitmap(bitmap, newW, newH, true)
+    }
+
+    private fun parseResponse(jsonText: String): Pair<Array<Int?>, Long?>? {
+        val grid = Array<Int?>(25) { null }
+        var parsedColor: Long? = null
+        try {
+            val cleanJson = jsonText
+                .removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+            val jsonObj = JSONObject(cleanJson)
+            val jsonArray = jsonObj.optJSONArray("grid") ?: return null
+
+            for (i in 0 until minOf(25, jsonArray.length())) {
+                if (!jsonArray.isNull(i)) {
+                    grid[i] = jsonArray.getInt(i)
+                }
+            }
+            grid[12] = null // Ensure free space is always null
+
+            val colorStr = jsonObj.optString("color")
+            if (colorStr.isNotEmpty() && colorStr.startsWith("#")) {
+                try {
+                    parsedColor = android.graphics.Color.parseColor(colorStr).toLong()
+                } catch (_: Exception) { }
+            }
+            return Pair(grid, parsedColor)
+        } catch (_: JSONException) { }
+        return null
+    }
+
     fun onManualCreate() {
-        val emptyGrid = Array<Int?>(25) { null }
         _state.value = ScanUiState(
             imageUri = null,
             isProcessing = false,
             errorMessage = null,
-            grid = emptyGrid,
-            cardColor = 0xFF42A5F5 // Default Blue
+            grid = Array(25) { null },
+            cardColor = 0xFF42A5F5,
+            cardName = "",
+            editingCardId = null
         )
+    }
+
+    /**
+     * Loads an existing card into the review state for editing.
+     */
+    fun loadExistingCard(cardId: Long) {
+        viewModelScope.launch {
+            val card = repo.observeCard(cardId).first() ?: return@launch
+            val cells = repo.observeCells(cardId).first()
+            val grid = Array<Int?>(25) { null }
+            cells.forEach { cell ->
+                val idx = cell.row * BingoRules.GRID_SIZE + cell.col
+                if (idx in grid.indices) {
+                    grid[idx] = if (cell.isFree) null else cell.value
+                }
+            }
+            _state.value = ScanUiState(
+                imageUri = null,
+                isProcessing = false,
+                errorMessage = null,
+                grid = grid,
+                cardColor = card.colorArgb,
+                cardName = card.name,
+                editingCardId = card.id
+            )
+        }
+    }
+
+    fun updateName(name: String) {
+        _state.value = _state.value.copy(cardName = name)
     }
 
     fun randomizeGrid() {
@@ -139,35 +236,6 @@ class ScanViewModel(private val repo: BingoRepository, private val settingsRepo:
         _state.value = _state.value.copy(cardColor = colorArgb)
     }
 
-    private fun parseGeminiResponse(jsonText: String): Pair<Array<Int?>, Long?>? {
-        val grid = Array<Int?>(25) { null }
-        var parsedColor: Long? = null
-        try {
-            val cleanJson = jsonText.removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
-            val jsonObj = org.json.JSONObject(cleanJson)
-            val jsonArray = jsonObj.optJSONArray("grid") ?: return null
-            for (i in 0 until minOf(25, jsonArray.length())) {
-                if (!jsonArray.isNull(i)) {
-                    grid[i] = jsonArray.getInt(i)
-                }
-            }
-            grid[12] = null // Ensure free space is always null
-            
-            val colorStr = jsonObj.optString("color")
-            if (colorStr.isNotEmpty() && colorStr.startsWith("#")) {
-                try {
-                    parsedColor = android.graphics.Color.parseColor(colorStr).toLong() // this will map standard colors
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
-            return Pair(grid, parsedColor)
-        } catch (e: JSONException) {
-            e.printStackTrace()
-        }
-        return null
-    }
-
     private fun getBitmapFromUri(uri: Uri): Bitmap? {
         val context = appContextProvider()
         return try {
@@ -175,6 +243,7 @@ class ScanViewModel(private val repo: BingoRepository, private val settingsRepo:
                 val source = ImageDecoder.createSource(context.contentResolver, uri)
                 ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
                     decoder.isMutableRequired = true
+                    decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
                 }
             } else {
                 @Suppress("DEPRECATION")
@@ -193,19 +262,17 @@ class ScanViewModel(private val repo: BingoRepository, private val settingsRepo:
         _state.value = _state.value.copy(grid = copy)
     }
 
-    fun saveAsNewCard() {
+    /**
+     * Saves — creates new card or updates existing based on editingCardId.
+     */
+    fun saveCard() {
         val current = _state.value
         val now = System.currentTimeMillis()
         val color = current.cardColor ?: (0xFF000000L or (Random.nextInt(0x00FFFFFF).toLong()))
-        val suffix = Random.nextInt(1000, 10_000)
-        val card = CardEntity(
-            name = "Card $suffix",
-            createdAtEpochMs = now,
-            updatedAtEpochMs = now,
-            colorArgb = color
-        )
+        val name = current.cardName.ifBlank { "Card ${Random.nextInt(1000, 10_000)}" }
 
         val cells = ArrayList<CellEntity>(BingoRules.GRID_SIZE * BingoRules.GRID_SIZE)
+        val editId = current.editingCardId ?: 0L
         for (r in 0 until BingoRules.GRID_SIZE) {
             for (c in 0 until BingoRules.GRID_SIZE) {
                 val idx = r * BingoRules.GRID_SIZE + c
@@ -213,7 +280,7 @@ class ScanViewModel(private val repo: BingoRepository, private val settingsRepo:
                 val v = if (isFree) null else current.grid[idx]
                 cells.add(
                     CellEntity(
-                        cardId = 0L,
+                        cardId = editId,
                         row = r,
                         col = c,
                         value = v,
@@ -225,16 +292,33 @@ class ScanViewModel(private val repo: BingoRepository, private val settingsRepo:
         }
 
         viewModelScope.launch {
-            repo.createCard(card, cells)
+            if (current.editingCardId != null) {
+                val card = CardEntity(
+                    id = current.editingCardId,
+                    name = name,
+                    createdAtEpochMs = now,
+                    updatedAtEpochMs = now,
+                    colorArgb = color
+                )
+                repo.updateCard(card, cells)
+            } else {
+                val card = CardEntity(
+                    name = name,
+                    createdAtEpochMs = now,
+                    updatedAtEpochMs = now,
+                    colorArgb = color
+                )
+                repo.createCard(card, cells)
+            }
         }
     }
 
     private fun appContextProvider() = com.mkz.bingocard.vision.AndroidContextProvider.appContext
 }
 
-class ScanViewModelFactory(private val repo: BingoRepository, private val settingsRepo: SettingsRepository) : ViewModelProvider.Factory {
+class ScanViewModelFactory(private val repo: BingoRepository) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         @Suppress("UNCHECKED_CAST")
-        return ScanViewModel(repo, settingsRepo) as T
+        return ScanViewModel(repo) as T
     }
 }

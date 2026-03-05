@@ -14,14 +14,17 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Button
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -46,6 +49,7 @@ fun ScanReviewScreen(
     stateFlow: StateFlow<ScanUiState>,
     onCellChanged: (row: Int, col: Int, value: Int?) -> Unit,
     onColorChanged: (Long) -> Unit,
+    onNameChanged: (String) -> Unit,
     onRandomize: () -> Unit,
     onSave: () -> Unit,
     onBack: () -> Unit
@@ -59,10 +63,13 @@ fun ScanReviewScreen(
         0xFFF4511E, 0xFF6D4C41, 0xFF757575, 0xFF546E7A
     )
 
+    val selectedColor = state.cardColor?.let { Color(it.toInt()) } ?: MaterialTheme.colorScheme.primary
+    val isEditing = state.editingCardId != null
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Review") },
+                title = { Text(if (isEditing) "Edit Card" else "Review") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Back")
@@ -78,8 +85,17 @@ fun ScanReviewScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("Review and edit", style = MaterialTheme.typography.titleMedium)
+            // Card name input
+            OutlinedTextField(
+                modifier = Modifier.fillMaxWidth(),
+                value = state.cardName,
+                onValueChange = onNameChanged,
+                label = { Text("Card Name") },
+                placeholder = { Text("e.g. Card 1") },
+                singleLine = true
+            )
 
+            // Color palette
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -91,7 +107,7 @@ fun ScanReviewScreen(
                     Box(
                         modifier = Modifier
                             .size(36.dp)
-                            .background(color = Color(cCode), shape = CircleShape)
+                            .background(color = Color(cCode.toInt()), shape = CircleShape)
                             .border(
                                 width = if (isSelected) 3.dp else 1.dp,
                                 color = if (isSelected) MaterialTheme.colorScheme.primary else Color.LightGray,
@@ -114,46 +130,75 @@ fun ScanReviewScreen(
             } else if (state.errorMessage != null) {
                 Text("Error: ${state.errorMessage}", color = MaterialTheme.colorScheme.error)
             } else {
-                ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-                Column(
+                // Card with colored border matching selected color
+                ElevatedCard(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                        .border(
+                            width = 3.dp,
+                            color = selectedColor,
+                            shape = RoundedCornerShape(12.dp)
+                        ),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.elevatedCardColors(
+                        containerColor = selectedColor.copy(alpha = 0.06f)
+                    )
                 ) {
-                    for (r in 0 until BingoRules.GRID_SIZE) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            for (c in 0 until BingoRules.GRID_SIZE) {
-                                val isFree = BingoRules.isFreeCell(r, c)
-                                val idx = r * BingoRules.GRID_SIZE + c
-                                val text = if (isFree) "FREE" else (state.grid[idx]?.toString() ?: "")
-                                OutlinedTextField(
-                                    modifier = Modifier.weight(1f),
-                                    value = text,
-                                    onValueChange = { new ->
-                                        if (isFree) return@OutlinedTextField
-                                        val parsed = new.toIntOrNull()
-                                        onCellChanged(r, c, parsed)
-                                    },
-                                    enabled = !isFree,
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // BINGO header row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceAround
+                        ) {
+                            listOf("B", "I", "N", "G", "O").forEach { letter ->
+                                Text(
+                                    text = letter,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = selectedColor
                                 )
+                            }
+                        }
+
+                        for (r in 0 until BingoRules.GRID_SIZE) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                for (c in 0 until BingoRules.GRID_SIZE) {
+                                    val isFree = BingoRules.isFreeCell(r, c)
+                                    val idx = r * BingoRules.GRID_SIZE + c
+                                    val text = if (isFree) "FREE" else (state.grid[idx]?.toString() ?: "")
+                                    OutlinedTextField(
+                                        modifier = Modifier.weight(1f),
+                                        value = text,
+                                        onValueChange = { new ->
+                                            if (isFree) return@OutlinedTextField
+                                            val parsed = new.toIntOrNull()
+                                            onCellChanged(r, c, parsed)
+                                        },
+                                        enabled = !isFree,
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
-            } // closes else block
 
             Spacer(modifier = Modifier.weight(1f))
 
-            Button(
-                modifier = Modifier.fillMaxWidth(),
-                onClick = onRandomize,
-                enabled = !state.isProcessing
-            ) {
-                Text("Randomize")
+            if (!isEditing) {
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onRandomize,
+                    enabled = !state.isProcessing
+                ) {
+                    Text("Randomize")
+                }
             }
 
             Button(
@@ -161,7 +206,7 @@ fun ScanReviewScreen(
                 onClick = onSave,
                 enabled = !state.isProcessing
             ) {
-                Text("Save")
+                Text(if (isEditing) "Update" else "Save")
             }
         }
     }

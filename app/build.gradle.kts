@@ -1,8 +1,16 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
+}
+
+val localProps = Properties()
+val localPropsFile = rootProject.file("local.properties")
+if (localPropsFile.exists()) {
+    localPropsFile.inputStream().use { localProps.load(it) }
 }
 
 android {
@@ -19,6 +27,12 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField(
+            "String",
+            "GITHUB_TOKENS",
+            "\"${localProps.getProperty("GITHUB_TOKENS", "")}\""
+        )
     }
 
     buildTypes {
@@ -39,6 +53,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -59,9 +74,7 @@ dependencies {
     implementation(libs.androidx.camera.view)
     implementation(libs.androidx.camera.extensions)
 
-    implementation(libs.google.mlkit.text.recognition)
-    implementation(libs.google.mlkit.document.scanner)
-    implementation(libs.google.generativeai)
+
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)

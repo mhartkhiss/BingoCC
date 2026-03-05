@@ -14,6 +14,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Icon
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
@@ -35,6 +37,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.unit.dp
 import com.mkz.bingocard.domain.BingoRules
 import com.mkz.bingocard.ui.vm.CardDetailUiState
@@ -46,6 +50,8 @@ fun CardDetailScreen(
     stateFlow: StateFlow<CardDetailUiState>,
     onToggleNumber: (value: Int, isMarked: Boolean) -> Unit,
     onDelete: () -> Unit,
+    onToggleActive: (Boolean) -> Unit,
+    onEditCard: () -> Unit,
     onBack: () -> Unit
 ) {
     val state by stateFlow.collectAsState()
@@ -61,6 +67,14 @@ fun CardDetailScreen(
                     }
                 },
                 actions = {
+                    Switch(
+                        checked = state.isActive,
+                        onCheckedChange = { onToggleActive(it) },
+                        modifier = Modifier.padding(end = 8.dp).scale(0.8f)
+                    )
+                    IconButton(onClick = onEditCard) {
+                        Icon(imageVector = Icons.Default.Edit, contentDescription = "Edit Card")
+                    }
                     IconButton(onClick = { showDeleteConfirm = true }) {
                         Icon(imageVector = Icons.Default.Delete, contentDescription = "Delete Card")
                     }
@@ -113,7 +127,9 @@ fun CardDetailScreen(
             }
 
             ElevatedCard(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .alpha(if (state.isActive) 1f else 0.4f),
                 colors = CardDefaults.elevatedCardColors(containerColor = base.copy(alpha = 0.08f))
             ) {
                 Column(
@@ -143,7 +159,7 @@ fun CardDetailScreen(
                                         .weight(1f)
                                         .size(64.dp)
                                         .background(cellBg, RoundedCornerShape(12.dp))
-                                        .clickable(enabled = !isFree && cell?.value != null) {
+                                        .clickable(enabled = state.isActive && !isFree && cell?.value != null) {
                                             if (cell?.value != null) {
                                                 onToggleNumber(cell.value, !marked)
                                             }

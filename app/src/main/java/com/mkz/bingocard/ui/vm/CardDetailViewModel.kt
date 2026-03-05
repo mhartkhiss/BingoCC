@@ -14,7 +14,8 @@ import kotlinx.coroutines.launch
 data class CardDetailUiState(
     val title: String = "Card",
     val colorArgb: Long = 0xFFCCCCCC,
-    val cells: List<CellEntity> = emptyList()
+    val cells: List<CellEntity> = emptyList(),
+    val isActive: Boolean = true
 )
 
 class CardDetailViewModel(
@@ -29,7 +30,8 @@ class CardDetailViewModel(
         CardDetailUiState(
             title = card?.name ?: "Card",
             colorArgb = card?.colorArgb ?: 0xFFCCCCCC,
-            cells = cells
+            cells = cells,
+            isActive = card?.isActive ?: true
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CardDetailUiState())
 
@@ -42,6 +44,12 @@ class CardDetailViewModel(
     fun deleteCard() {
         viewModelScope.launch {
             repo.deleteCard(cardId)
+        }
+    }
+
+    fun toggleActive(isActive: Boolean) {
+        viewModelScope.launch {
+            repo.setCardActive(cardId, isActive)
         }
     }
 }

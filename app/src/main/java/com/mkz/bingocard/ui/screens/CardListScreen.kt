@@ -5,8 +5,11 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.shadow
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,8 +18,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -34,23 +39,26 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
-import androidx.activity.result.IntentSenderRequest
-import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
-import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
-import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.FileProvider
+import java.io.File
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ViewModule
 import androidx.compose.material3.Icon
 import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.OutlinedTextField
@@ -63,11 +71,14 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
-import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Surface
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -77,6 +88,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.Modifier
@@ -93,21 +107,25 @@ import kotlin.math.roundToInt
 import kotlin.math.absoluteValue
 import kotlinx.coroutines.flow.StateFlow
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun CardListScreen(
     stateFlow: StateFlow<CardListUiState>,
     onCardClick: (Long) -> Unit,
+    onEditCard: (Long) -> Unit,
     onGalleryClick: (android.net.Uri) -> Unit,
     onManualCreate: () -> Unit,
     onOpenDrawer: () -> Unit,
     onCallNumber: (Int) -> Unit,
+    onUncallNumber: (Int) -> Unit,
     onDeleteCard: (Long) -> Unit,
-    onResetAll: () -> Unit
+    onResetAll: () -> Unit,
+    onToggleActive: (Long, Boolean) -> Unit
 ) {
     val state by stateFlow.collectAsState()
     var showAddSheet by remember { mutableStateOf(false) }
     var cardToDelete by remember { mutableStateOf<Long?>(null) }
+    var cardOptionsId by remember { mutableStateOf<Long?>(null) }
     var showResetConfirm by remember { mutableStateOf(false) }
     var showAlreadyCalledDialog by remember { mutableStateOf(false) }
     var alreadyCalledNumber by remember { mutableStateOf<Int?>(null) }
@@ -116,6 +134,7 @@ fun CardListScreen(
     var historyFilterText by remember { mutableStateOf("") }
     var historyShowRemaining by remember { mutableStateOf(false) }
     var viewMode by remember { mutableStateOf(CardListViewMode.List) }
+    var showUndoConfirm by remember { mutableStateOf(false) }
 
     val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
 
@@ -125,55 +144,44 @@ fun CardListScreen(
     var lastCards by remember { mutableStateOf(state.cards) }
 
     LaunchedEffect(state.cards) {
-        val oldWins = lastCards.filter { it.isWin }.map { it.cardId }.toSet()
+        val oldWinIds = lastCards.filter { it.isWin }.map { it.cardId }.toSet()
         val newWins = state.cards.filter { it.isWin }.map { it.cardId }
-        val justWon = newWins.firstOrNull { it !in oldWins }
-        
-        if (justWon != null) {
-            val index = state.cards.indexOfFirst { it.cardId == justWon }
-            if (index >= 0) {
-                if (viewMode == CardListViewMode.List) {
-                    listState.animateScrollToItem(index)
-                } else {
-                    gridState.animateScrollToItem(index)
-                }
+        val justWon = newWins.any { it !in oldWinIds }
+
+        val oldWaitIds = lastCards.filter { it.isNearWin }.map { it.cardId }.toSet()
+        val newWaits = state.cards.filter { it.isNearWin }.map { it.cardId }
+        val newWaiting = newWaits.any { it !in oldWaitIds }
+
+        if (justWon || newWaiting) {
+            // Scroll to top since sorted cards place wins/waits first
+            if (viewMode == CardListViewMode.List) {
+                listState.animateScrollToItem(0)
+            } else {
+                gridState.animateScrollToItem(0)
             }
         }
         lastCards = state.cards
     }
 
     val context = androidx.compose.ui.platform.LocalContext.current
-    val activity = context as? android.app.Activity
 
-    val scannerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.StartIntentSenderForResult()
-    ) { result ->
-        if (result.resultCode == android.app.Activity.RESULT_OK) {
-            val resultData = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
-            resultData?.pages?.firstOrNull()?.imageUri?.let { uri ->
-                showAddSheet = false
-                onGalleryClick(uri)
-            }
+    // Camera capture: saves photo to a temp file, then sends URI to crop screen
+    val cameraImageUri = remember {
+        val file = File(context.cacheDir, "bingo_capture.jpg")
+        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success) {
+            showAddSheet = false
+            onGalleryClick(cameraImageUri)
         }
     }
 
-    val launchScanner = {
-        val options = GmsDocumentScannerOptions.Builder()
-            .setGalleryImportAllowed(true)
-            .setPageLimit(1)
-            .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
-            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
-            .build()
-        val scanner = GmsDocumentScanning.getClient(options)
-        activity?.let {
-            scanner.getStartScanIntent(it).addOnSuccessListener { intentSender ->
-                scannerLauncher.launch(IntentSenderRequest.Builder(intentSender).build())
-            }
-        }
-    }
-
-    val galleryLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    val galleryLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
     ) { uri ->
         if (uri != null) {
             showAddSheet = false
@@ -184,13 +192,49 @@ fun CardListScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Bingo Cards") },
+                title = {
+                    if (state.calledNumbers.isEmpty()) {
+                        Text("Bingo Cards")
+                    } else {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            // Show most recent first (calledNumbers is already DESC from DB)
+                            state.calledNumbers.take(15).forEach { number ->
+                                val letter = when (number) {
+                                    in 1..15 -> "B"
+                                    in 16..30 -> "I"
+                                    in 31..45 -> "N"
+                                    in 46..60 -> "G"
+                                    in 61..75 -> "O"
+                                    else -> ""
+                                }
+                                FilterChip(
+                                    selected = false,
+                                    onClick = { showHistorySheet = true },
+                                    label = {
+                                        Text(
+                                            text = "$letter$number",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                                    )
+                                )
+                            }
+                        }
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onOpenDrawer) {
                         Icon(imageVector = Icons.Default.Menu, contentDescription = "Menu")
                     }
-                }
-                ,
+                },
                 actions = {
                     IconButton(
                         onClick = {
@@ -206,80 +250,192 @@ fun CardListScreen(
                         }
                         Icon(imageVector = icon, contentDescription = "Toggle view")
                     }
+                    IconButton(onClick = { showAddSheet = true }) {
+                        Icon(imageVector = Icons.Default.Add, contentDescription = "Add Card")
+                    }
                 }
             )
         },
         bottomBar = {
             BottomAppBar(
                 actions = {
-                    IconButton(onClick = { showHistorySheet = true }) {
-                        Icon(imageVector = Icons.Default.History, contentDescription = "Called Numbers History")
+                    val typedValue = calledNumberText.toIntOrNull()
+
+                    val winningGreen = Color(0xFF4CAF50)
+                    val defaultGray = Color.Gray
+                    val markedCellColor = MaterialTheme.colorScheme.primary
+
+                    val isWinningNumber = typedValue != null && typedValue !in state.calledNumbers && state.cards.any { card ->
+                        card.isActive && card.waitingCellIndexes.any { idx ->
+                            card.cells.getOrNull(idx)?.value == typedValue
+                        }
                     }
 
-                    val tryMarkCalledNumber = {
-                        val v = calledNumberText.toIntOrNull()
-                        if (v != null && v in 1..75) {
-                            if (v in state.calledNumbers) {
-                                alreadyCalledNumber = v
-                                showAlreadyCalledDialog = true
-                            } else {
-                                onCallNumber(v)
-                                calledNumberText = ""
-                                keyboardController?.hide()
+                    val isMatchingNumber = !isWinningNumber && typedValue != null && typedValue !in state.calledNumbers && state.cards.any { card ->
+                        card.isActive && card.cells.any { it.value == typedValue && !it.isMarked && !it.isFree }
+                    }
+
+                    val currentColor = when {
+                        isWinningNumber -> winningGreen
+                        isMatchingNumber -> markedCellColor
+                        else -> defaultGray
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        // Reset button
+                        IconButton(
+                            onClick = { showResetConfirm = true },
+                            modifier = Modifier.background(Color(0xFFFF9800).copy(alpha = 0.15f), shape = androidx.compose.foundation.shape.CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Reset All Marks",
+                                tint = Color(0xFFFF9800) // Orange
+                            )
+                        }
+
+                        // Undo button
+                        IconButton(
+                            onClick = { showUndoConfirm = true },
+                            enabled = state.calledNumbers.isNotEmpty()
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Undo,
+                                contentDescription = "Undo Last Call",
+                                tint = if (state.calledNumbers.isNotEmpty())
+                                    MaterialTheme.colorScheme.primary
+                                else
+                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(4.dp))
+
+                        val tryMarkCalledNumber = {
+                            if (typedValue != null && typedValue in 1..75) {
+                                if (typedValue in state.calledNumbers) {
+                                    alreadyCalledNumber = typedValue
+                                    showAlreadyCalledDialog = true
+                                } else {
+                                    onCallNumber(typedValue)
+                                    calledNumberText = ""
+                                    keyboardController?.hide()
+                                }
                             }
                         }
-                    }
 
-                    OutlinedTextField(
-                        modifier = Modifier.width(150.dp).padding(horizontal = 8.dp),
-                        value = calledNumberText,
-                        onValueChange = { calledNumberText = it },
-                        label = { Text("Call #") },
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Number,
-                            imeAction = ImeAction.Done
-                        ),
-                        keyboardActions = KeyboardActions(
-                            onDone = { tryMarkCalledNumber() }
-                        ),
-                        singleLine = true
-                    )
-                    
-                    val v = calledNumberText.toIntOrNull()
-                    Button(
-                        modifier = Modifier.padding(end = 8.dp),
-                        onClick = { 
-                            tryMarkCalledNumber()
-                        },
-                        enabled = v != null && v in 1..75
-                    ) {
-                        Icon(imageVector = Icons.Default.Check, contentDescription = "Mark")
-                    }
-                },
-                floatingActionButton = {
-                    Row(
-                        modifier = Modifier.wrapContentWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        FloatingActionButton(
-                            onClick = { showResetConfirm = true },
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            elevation = FloatingActionButtonDefaults.bottomAppBarFabElevation()
-                        ) {
-                            Icon(imageVector = Icons.Default.Refresh, contentDescription = "Reset All Marks")
+                        val glowModifier = if (isWinningNumber || isMatchingNumber) {
+                            Modifier.background(Color.Transparent, androidx.compose.foundation.shape.RoundedCornerShape(26.dp))
+                                .shadow(
+                                    elevation = 16.dp, 
+                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(26.dp), 
+                                    spotColor = currentColor, 
+                                    ambientColor = currentColor
+                                )
+                        } else Modifier
+
+                        val emoji = when {
+                            typedValue == null || typedValue !in 1..75 || typedValue in state.calledNumbers -> ""
+                            isWinningNumber -> "🎉"
+                            isMatchingNumber -> "😆"
+                            else -> "☹️"
                         }
 
-                        FloatingActionButton(
-                            onClick = { showAddSheet = true },
-                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            elevation = FloatingActionButtonDefaults.bottomAppBarFabElevation()
-                        ) {
-                            Icon(imageVector = Icons.Default.Add, contentDescription = "Add Card")
-                        }
-                    }
-                }
+                        OutlinedTextField(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(52.dp)
+                                .padding(end = 12.dp)
+                                .then(glowModifier),
+                            value = calledNumberText,
+                            onValueChange = { newText ->
+                                val filtered = newText.filter { it.isDigit() }.take(2)
+                                val num = filtered.toIntOrNull()
+                                if (filtered.isEmpty() || (num != null && num in 1..75)) {
+                                    calledNumberText = filtered
+                                }
+                            },
+                            textStyle = androidx.compose.material3.LocalTextStyle.current.copy(
+                                textAlign = TextAlign.Center,
+                                color = currentColor
+                            ),
+                            placeholder = { 
+                                Text(
+                                    text = "Unsay number?...",
+                                    modifier = Modifier.fillMaxWidth(),
+                                    textAlign = TextAlign.Center
+                                ) 
+                            },
+                            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = currentColor,
+                                unfocusedBorderColor = currentColor,
+                                cursorColor = currentColor
+                            ),
+                            leadingIcon = {
+                                val letter = when (typedValue) {
+                                    in 1..15 -> "B"
+                                    in 16..30 -> "I"
+                                    in 31..45 -> "N"
+                                    in 46..60 -> "G"
+                                    in 61..75 -> "O"
+                                    else -> ""
+                                }
+                                if (letter.isNotEmpty()) {
+                                    Text(
+                                        text = letter,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = currentColor,
+                                        modifier = Modifier.padding(start = 12.dp)
+                                    )
+                                } else {
+                                    Spacer(modifier = Modifier.width(28.dp)) // Avoid layout jumps
+                                }
+                            },
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Number,
+                                imeAction = ImeAction.Done
+                            ),
+                            keyboardActions = KeyboardActions(
+                                onDone = { tryMarkCalledNumber() }
+                            ),
+                            singleLine = true,
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(26.dp),
+                            trailingIcon = {
+                                if (calledNumberText.isNotEmpty()) {
+                                    IconButton(
+                                        onClick = { tryMarkCalledNumber() },
+                                        enabled = typedValue != null && typedValue in 1..75,
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        if (emoji.isNotEmpty()) {
+                                            Text(text = emoji, style = MaterialTheme.typography.titleMedium)
+                                        } else {
+                                            val iconTint = if (typedValue != null && typedValue in 1..75) {
+                                                currentColor
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                            }
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = "Mark",
+                                                tint = iconTint
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    Spacer(modifier = Modifier.width(32.dp))
+                                }
+                            }
+                        )
+                    }     // Row
+                }         // Actions
             )
         }
     ) { innerPadding ->
@@ -330,92 +486,101 @@ fun CardListScreen(
                         }
                         val borderColor = base.copy(alpha = 0.90f)
 
-                        val dismissState = rememberSwipeToDismissBoxState(
-                            confirmValueChange = { value ->
-                                if (value == SwipeToDismissBoxValue.EndToStart) {
-                                    cardToDelete = item.cardId
-                                }
-                                false
-                            }
-                        )
-
-                        SwipeToDismissBox(
-                            state = dismissState,
-                            enableDismissFromStartToEnd = false,
-                            backgroundContent = {
-                                val color = MaterialTheme.colorScheme.error
-                                if (dismissState.dismissDirection == SwipeToDismissBoxValue.EndToStart) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .background(color, shape = CardDefaults.elevatedShape)
-                                            .padding(horizontal = 20.dp),
-                                        contentAlignment = Alignment.CenterEnd
-                                    ) {
-                                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.onError)
-                                    }
-                                }
-                            }
-                        ) {
-                            Box {
-                                ElevatedCard(
+                        Box {
+                            ElevatedCard(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(CardDefaults.elevatedShape)
+                                    .background(Color.Transparent)
+                                    .combinedClickable(
+                                        enabled = true,
+                                        onClick = { if (item.isActive) onCardClick(item.cardId) },
+                                        onLongClick = { cardOptionsId = item.cardId }
+                                    )
+                                    .alpha(if (item.isActive) 1f else 0.4f),
+                                colors = CardDefaults.elevatedCardColors(containerColor = container),
+                                elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
+                            ) {
+                                Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clip(CardDefaults.elevatedShape)
                                         .background(Color.Transparent)
-                                        .clickable { onCardClick(item.cardId) },
-                                    colors = CardDefaults.elevatedCardColors(containerColor = container),
-                                    elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
+                                        .padding(20.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Column(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .background(Color.Transparent)
-                                                .padding(20.dp)
-                                        ) {
-                                            if (item.isWin) {
-                                                SlidingWinnerBanner()
-                                            } else {
-                                                Text(text = item.name, style = MaterialTheme.typography.titleLarge)
-                                            }
-                                            val status = when {
-                                                item.isWin -> "WIN"
-                                                item.isNearWin -> "${item.waitingCellIndexes.size} waiting"
-                                                else -> null
-                                            }
-                                            if (status != null) {
+                                        Text(
+                                            text = item.name,
+                                            style = MaterialTheme.typography.titleLarge,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        if (item.winCount > 0) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .background(MaterialTheme.colorScheme.error, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                                                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
                                                 Text(
-                                                    text = status,
+                                                    text = "WIN: ${item.winCount}",
+                                                    color = MaterialTheme.colorScheme.onError,
                                                     style = MaterialTheme.typography.labelMedium,
-                                                    color = Color.White,
-                                                    modifier = Modifier
-                                                        .padding(top = 12.dp)
-                                                        .background(badgeColor, shape = MaterialTheme.shapes.small)
-                                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                                    fontWeight = FontWeight.Bold
                                                 )
+                                            }
+                                            Spacer(modifier = Modifier.width(8.dp))
                                         }
-                                        Spacer(modifier = Modifier.padding(top = 10.dp))
-                                        BingoCardTable(
-                                            item = item,
-                                            cellSize = 34.dp
+                                        Switch(
+                                            checked = item.isActive,
+                                            onCheckedChange = { onToggleActive(item.cardId, it) },
+                                            modifier = Modifier.scale(0.8f)
                                         )
                                     }
-                                }
-
-                                androidx.compose.foundation.Canvas(
-                                    modifier = Modifier
-                                        .matchParentSize()
-                                ) {
-                                    drawRoundRect(
-                                        color = borderColor,
-                                        style = Stroke(width = 5f),
-                                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(28f, 28f)
+                                    if (item.isWin) {
+                                        Spacer(modifier = Modifier.padding(top = 4.dp))
+                                        SlidingWinnerBanner()
+                                    }
+                                    val status = when {
+                                        item.isWin -> "PALDOOO!"
+                                        item.isNearWin -> "${item.waitingCellIndexes.size} waiting"
+                                        else -> null
+                                    }
+                                    if (status != null) {
+                                        Text(
+                                            text = status,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = Color.White,
+                                            modifier = Modifier
+                                                .padding(top = 12.dp)
+                                                .background(badgeColor, shape = MaterialTheme.shapes.small)
+                                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.padding(top = 10.dp))
+                                    BingoCardTable(
+                                        item = item,
+                                        cellSize = 34.dp
                                     )
                                 }
+                            }
 
-                                if (item.isWin) {
-                                    WinConfettiOverlay(modifier = Modifier.matchParentSize(), seed = item.cardId)
-                                }
+                            androidx.compose.foundation.Canvas(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .alpha(if (item.isActive) 1f else 0.4f)
+                            ) {
+                                drawRoundRect(
+                                    color = borderColor,
+                                    style = Stroke(width = 5f),
+                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(28f, 28f)
+                                )
+                            }
+
+                            if (item.isWin) {
+                                WinConfettiOverlay(modifier = Modifier.matchParentSize(), seed = item.cardId)
                             }
                         }
                     }
@@ -437,7 +602,12 @@ fun CardListScreen(
                             ElevatedCard(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { onCardClick(item.cardId) },
+                                    .combinedClickable(
+                                        enabled = true,
+                                        onClick = { if (item.isActive) onCardClick(item.cardId) },
+                                        onLongClick = { cardOptionsId = item.cardId }
+                                    )
+                                    .alpha(if (item.isActive) 1f else 0.4f),
                                 colors = CardDefaults.elevatedCardColors(containerColor = container),
                                 elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
                             ) {
@@ -447,17 +617,49 @@ fun CardListScreen(
                                         .padding(14.dp),
                                     verticalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = item.name,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        if (item.winCount > 0) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .background(MaterialTheme.colorScheme.error, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                                                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = "WIN: ${item.winCount}",
+                                                    color = MaterialTheme.colorScheme.onError,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                        }
+                                        Switch(
+                                            checked = item.isActive,
+                                            onCheckedChange = { onToggleActive(item.cardId, it) },
+                                            modifier = Modifier.scale(0.7f)
+                                        )
+                                    }
                                     if (item.isWin) {
                                         SlidingWinnerBanner()
-                                    } else {
-                                        Text(text = item.name, style = MaterialTheme.typography.titleMedium)
                                     }
                                     BingoCardTable(item = item, cellSize = 44.dp)
                                 }
                             }
 
                             androidx.compose.foundation.Canvas(
-                                modifier = Modifier.matchParentSize()
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .alpha(if (item.isActive) 1f else 0.4f)
                             ) {
                                 drawRoundRect(
                                     color = borderColor,
@@ -497,7 +699,7 @@ fun CardListScreen(
                         }
                         Button(
                             modifier = Modifier.fillMaxWidth(),
-                            onClick = { launchScanner() }
+                            onClick = { cameraLauncher.launch(cameraImageUri) }
                         ) {
                             Text("Camera ")
                         }
@@ -513,135 +715,186 @@ fun CardListScreen(
                 }
             }
             if (showHistorySheet) {
-                ModalBottomSheet(
+                Dialog(
                     onDismissRequest = {
                         showHistorySheet = false
                         historyFilterText = ""
-                    }
+                    },
+                    properties = DialogProperties(usePlatformDefaultWidth = false)
                 ) {
-                    val filter = historyFilterText.trim()
-                    val filteredNumbers = remember(state.calledNumbers, filter, historyShowRemaining) {
-                        val source = if (historyShowRemaining) {
-                            (1..75).filter { it !in state.calledNumbers }
-                        } else {
-                            state.calledNumbers
-                        }
-
-                        if (filter.isBlank()) {
-                            source
-                        } else {
-                            val q = filter.lowercase()
-                            val firstChar = q.firstOrNull()
-                            val columnLetter = when (firstChar) {
-                                'b', 'i', 'n', 'g', 'o' -> firstChar
-                                else -> null
-                            }
-                            val digitsOnly = q.filter { it.isDigit() }
-                            val wantedValue = digitsOnly.toIntOrNull()
-
-                            source.filter { number ->
-                                val letterMatches = when (columnLetter) {
-                                    'b' -> number in 1..15
-                                    'i' -> number in 16..30
-                                    'n' -> number in 31..45
-                                    'g' -> number in 46..60
-                                    'o' -> number in 61..75
-                                    else -> true
-                                }
-                                val numberMatches = wantedValue?.let { it == number } ?: number.toString().contains(digitsOnly)
-                                letterMatches && (digitsOnly.isBlank() || numberMatches)
-                            }
-                        }
-                    }
-
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Called Numbers",
-                                style = MaterialTheme.typography.titleMedium,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Text(
-                                text = "${filteredNumbers.size}",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                        val filter = historyFilterText.trim()
+                        val filteredNumbers = remember(state.calledNumbers, filter, historyShowRemaining) {
+                            val source = if (historyShowRemaining) {
+                                (1..75).filter { it !in state.calledNumbers }
+                            } else {
+                                state.calledNumbers
+                            }
+
+                            if (filter.isBlank()) {
+                                source
+                            } else {
+                                val q = filter.lowercase()
+                                val firstChar = q.firstOrNull()
+                                val columnLetter = when (firstChar) {
+                                    'b', 'i', 'n', 'g', 'o' -> firstChar
+                                    else -> null
+                                }
+                                val digitsOnly = q.filter { it.isDigit() }
+                                val wantedValue = digitsOnly.toIntOrNull()
+
+                                source.filter { number ->
+                                    val letterMatches = when (columnLetter) {
+                                        'b' -> number in 1..15
+                                        'i' -> number in 16..30
+                                        'n' -> number in 31..45
+                                        'g' -> number in 46..60
+                                        'o' -> number in 61..75
+                                        else -> true
+                                    }
+                                    val numberMatches = wantedValue?.let { it == number } ?: number.toString().contains(digitsOnly)
+                                    letterMatches && (digitsOnly.isBlank() || numberMatches)
+                                }
+                            }
                         }
 
-                        FilterChip(
-                            selected = historyShowRemaining,
-                            onClick = { historyShowRemaining = !historyShowRemaining },
-                            label = { Text("Remaining") },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer
-                            )
-                        )
-
-                        OutlinedTextField(
-                            modifier = Modifier.fillMaxWidth(),
-                            value = historyFilterText,
-                            onValueChange = { historyFilterText = it },
-                            label = { Text("Search") },
-                            placeholder = { Text("e.g. 12, B12, G") },
-                            singleLine = true
-                        )
-
-                        if (filteredNumbers.isEmpty()) {
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                            ) {
-                                Text(
-                                    text = if (filter.isBlank()) "No numbers called yet." else "No matches.",
-                                    modifier = Modifier.padding(16.dp),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                        Scaffold(
+                            topBar = {
+                                TopAppBar(
+                                    title = {
+                                        Column {
+                                            Text("Called Numbers", style = MaterialTheme.typography.titleLarge)
+                                            Text(
+                                                text = "${state.calledNumbers.size} called · ${75 - state.calledNumbers.size} remaining",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    },
+                                    navigationIcon = {
+                                        IconButton(onClick = {
+                                            showHistorySheet = false
+                                            historyFilterText = ""
+                                        }) {
+                                            Icon(imageVector = Icons.Default.Close, contentDescription = "Close")
+                                        }
+                                    }
                                 )
                             }
-                        } else {
-                            LazyColumn(
+                        ) { historyPadding ->
+                            Column(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(bottom = 12.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    .fillMaxSize()
+                                    .padding(historyPadding)
+                                    .padding(horizontal = 16.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                items(filteredNumbers) { number ->
-                                    ElevatedCard(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 1.dp)
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    FilterChip(
+                                        selected = !historyShowRemaining,
+                                        onClick = { historyShowRemaining = false },
+                                        label = { Text("Called (${state.calledNumbers.size})") },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer
+                                        )
+                                    )
+                                    FilterChip(
+                                        selected = historyShowRemaining,
+                                        onClick = { historyShowRemaining = true },
+                                        label = { Text("Remaining (${75 - state.calledNumbers.size})") },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = Color(0xFFF57C00).copy(alpha = 0.25f)
+                                        )
+                                    )
+                                }
+
+                                OutlinedTextField(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    value = historyFilterText,
+                                    onValueChange = { historyFilterText = it },
+                                    label = { Text("Search") },
+                                    placeholder = { Text("e.g. 12, B12, G") },
+                                    singleLine = true
+                                )
+
+                                if (filteredNumbers.isEmpty()) {
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth().padding(top = 32.dp),
+                                        contentAlignment = Alignment.Center
                                     ) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(horizontal = 16.dp, vertical = 12.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = number.toString(),
-                                                style = MaterialTheme.typography.titleLarge,
-                                                color = if (historyShowRemaining) Color(0xFFF57C00) else MaterialTheme.colorScheme.onSurface
-                                            )
-                                            Spacer(modifier = Modifier.width(12.dp))
-                                            Text(
-                                                text = when (number) {
-                                                    in 1..15 -> "B"
-                                                    in 16..30 -> "I"
-                                                    in 31..45 -> "N"
-                                                    in 46..60 -> "G"
-                                                    in 61..75 -> "O"
-                                                    else -> ""
-                                                },
-                                                style = MaterialTheme.typography.labelLarge,
-                                                color = MaterialTheme.colorScheme.primary
-                                            )
+                                        Text(
+                                            text = if (filter.isBlank()) "No numbers called yet." else "No matches.",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                } else {
+                                    Text(
+                                        text = "${filteredNumbers.size} shown",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    LazyColumn(
+                                        modifier = Modifier.fillMaxSize(),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        items(filteredNumbers) { number ->
+                                            val letter = when (number) {
+                                                in 1..15 -> "B"
+                                                in 16..30 -> "I"
+                                                in 31..45 -> "N"
+                                                in 46..60 -> "G"
+                                                in 61..75 -> "O"
+                                                else -> ""
+                                            }
+                                            val letterColor = when (letter) {
+                                                "B" -> Color(0xFF1E88E5)
+                                                "I" -> Color(0xFFE53935)
+                                                "N" -> Color(0xFF43A047)
+                                                "G" -> Color(0xFFFDD835)
+                                                "O" -> Color(0xFF8E24AA)
+                                                else -> MaterialTheme.colorScheme.primary
+                                            }
+
+                                            ElevatedCard(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                elevation = CardDefaults.elevatedCardElevation(defaultElevation = 1.dp)
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    // Letter badge
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(36.dp)
+                                                            .clip(MaterialTheme.shapes.small)
+                                                            .background(letterColor.copy(alpha = 0.15f)),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Text(
+                                                            text = letter,
+                                                            style = MaterialTheme.typography.titleMedium,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = letterColor
+                                                        )
+                                                    }
+                                                    Spacer(modifier = Modifier.width(16.dp))
+                                                    Text(
+                                                        text = number.toString(),
+                                                        style = MaterialTheme.typography.titleLarge,
+                                                        fontWeight = FontWeight.Medium,
+                                                        color = if (historyShowRemaining) Color(0xFFF57C00) else MaterialTheme.colorScheme.onSurface
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -650,6 +903,48 @@ fun CardListScreen(
                     }
                 }
             }
+
+            if (cardOptionsId != null) {
+                ModalBottomSheet(
+                    onDismissRequest = { cardOptionsId = null }
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Text("Card Options", style = MaterialTheme.typography.titleMedium)
+
+                        Button(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = {
+                                val id = cardOptionsId
+                                cardOptionsId = null
+                                if (id != null) onEditCard(id)
+                            }
+                        ) {
+                            Icon(Icons.Default.Edit, contentDescription = "Edit", modifier = Modifier.padding(end = 8.dp))
+                            Text("Edit Card")
+                        }
+
+                        Button(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            onClick = {
+                                cardToDelete = cardOptionsId
+                                cardOptionsId = null
+                            }
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete", modifier = Modifier.padding(end = 8.dp))
+                            Text("Delete Card")
+                        }
+                        
+                        Spacer(modifier = Modifier.padding(bottom = 16.dp))
+                    }
+                }
+            }
+
             if (cardToDelete != null) {
                 AlertDialog(
                     onDismissRequest = { cardToDelete = null },
@@ -678,6 +973,7 @@ fun CardListScreen(
                     confirmButton = {
                         TextButton(onClick = { 
                             onResetAll()
+                            calledNumberText = ""
                             showResetConfirm = false 
                         }) {
                             Text("Reset", color = MaterialTheme.colorScheme.error)
@@ -685,6 +981,37 @@ fun CardListScreen(
                     },
                     dismissButton = {
                         TextButton(onClick = { showResetConfirm = false }) {
+                            Text("Cancel")
+                        }
+                    }
+                )
+            }
+            if (showUndoConfirm && state.calledNumbers.isNotEmpty()) {
+                val lastNumber = state.calledNumbers.first() // already DESC order
+                val lastLetter = when (lastNumber) {
+                    in 1..15 -> "B"
+                    in 16..30 -> "I"
+                    in 31..45 -> "N"
+                    in 46..60 -> "G"
+                    in 61..75 -> "O"
+                    else -> ""
+                }
+                AlertDialog(
+                    onDismissRequest = { showUndoConfirm = false },
+                    title = { Text("Undo Last Call") },
+                    text = {
+                        Text("Remove $lastLetter$lastNumber from called numbers and unmark it on all cards?")
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            onUncallNumber(lastNumber)
+                            showUndoConfirm = false
+                        }) {
+                            Text("Undo", color = MaterialTheme.colorScheme.error)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showUndoConfirm = false }) {
                             Text("Cancel")
                         }
                     }
@@ -702,13 +1029,30 @@ private enum class CardListViewMode {
 @Composable
 private fun SlidingWinnerBanner() {
     val transition = rememberInfiniteTransition(label = "winnerBanner")
-    val phase by transition.animateFloat(
+
+    // Scrolling phase
+    val scrollPhase by transition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2600, easing = LinearEasing)
+            animation = tween(durationMillis = 4000, easing = LinearEasing)
         ),
-        label = "winnerBannerPhase"
+        label = "winnerBannerScroll"
+    )
+
+    // Color cycling phase
+    val colorPhase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 3000, easing = LinearEasing)
+        ),
+        label = "winnerBannerColor"
+    )
+
+    val rainbowColors = listOf(
+        Color(0xFFE53935), Color(0xFFFF9800), Color(0xFFFDD835),
+        Color(0xFF43A047), Color(0xFF1E88E5), Color(0xFF8E24AA)
     )
 
     var textWidthPx by remember { mutableStateOf(1) }
@@ -717,23 +1061,28 @@ private fun SlidingWinnerBanner() {
         modifier = Modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.small)
-            .background(Color(0xFF2E7D32).copy(alpha = 0.12f))
-            .padding(vertical = 6.dp)
+            .background(Color(0xFF2E7D32).copy(alpha = 0.10f))
+            .padding(vertical = 4.dp)
     ) {
         val unit = textWidthPx.coerceAtLeast(1)
-        val x = -((phase * unit).roundToInt() % unit)
+        val x = -((scrollPhase * unit).roundToInt() % unit)
 
         Row(modifier = Modifier.offset { IntOffset(x, 0) }) {
-            repeat(12) {
-                Text(
-                    text = "PALDOOOOOOO!   ",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Black,
-                    color = Color(0xFF2E7D32),
-                    maxLines = 1,
-                    softWrap = false,
-                    modifier = Modifier.onSizeChanged { textWidthPx = it.width }
-                )
+            repeat(10) { repeatIdx ->
+                val bannerText = "✦ PALDOOO! ✦  "
+                Row(modifier = Modifier.onSizeChanged { textWidthPx = it.width }) {
+                    bannerText.forEachIndexed { charIdx, c ->
+                        val cIdx = ((colorPhase * rainbowColors.size + charIdx * 0.3f + repeatIdx).toInt()) % rainbowColors.size
+                        Text(
+                            text = c.toString(),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Black,
+                            color = rainbowColors[cIdx],
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
             }
         }
     }
@@ -782,7 +1131,7 @@ private fun BingoCardTable(
                     }
 
                     val textColor = when {
-                        isFree -> Color(0xFFFF7F50)
+                        isFree -> MaterialTheme.colorScheme.primary
                         marked -> MaterialTheme.colorScheme.onPrimary
                         else -> MaterialTheme.colorScheme.onSurface
                     }
@@ -831,42 +1180,69 @@ private fun WinConfettiOverlay(
     seed: Long
 ) {
     val transition = rememberInfiniteTransition(label = "confetti")
-    val phase by transition.animateFloat(
+
+    val fallPhase by transition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2600, easing = LinearEasing)
+            animation = tween(durationMillis = 3500, easing = LinearEasing)
         ),
-        label = "confettiPhase"
+        label = "confettiFall"
+    )
+
+    val sparklePhase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1800, easing = LinearEasing)
+        ),
+        label = "confettiSparkle"
     )
 
     androidx.compose.foundation.Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
         val colors = listOf(
-            Color(0xFF66BB6A),
-            Color(0xFFFFCA28),
-            Color(0xFF42A5F5),
-            Color(0xFFAB47BC),
-            Color(0xFFEF5350)
+            Color(0xFFE53935), Color(0xFFFF9800), Color(0xFFFDD835),
+            Color(0xFF43A047), Color(0xFF1E88E5), Color(0xFF8E24AA),
+            Color(0xFFFF5252), Color(0xFF69F0AE)
         )
 
         val s = seed.absoluteValue.toInt().coerceAtLeast(1)
-        for (i in 0 until 22) {
+        val particleCount = 40
+
+        for (i in 0 until particleCount) {
             val x = ((s * (i + 7)) % 97) / 97f
             val y0 = ((s * (i + 19)) % 89) / 89f
-            val speed = 0.35f + (((s * (i + 11)) % 100) / 100f) * 0.85f
-            val drift = (((s * (i + 29)) % 100) / 100f - 0.5f) * 0.06f
+            val speed = 0.3f + (((s * (i + 11)) % 100) / 100f) * 0.7f
+            val drift = (((s * (i + 29)) % 100) / 100f - 0.5f) * 0.10f
 
-            val y = ((y0 + phase * speed) % 1f)
-            val cx = ((x + phase * drift).coerceIn(0f, 1f) * w)
+            val y = ((y0 + fallPhase * speed) % 1f)
+            val cx = ((x + fallPhase * drift + kotlin.math.sin(fallPhase * 6.28f + i.toFloat()) * 0.02f).coerceIn(0f, 1f) * w)
             val cy = (y * h)
-            val r = 3f + (((s * (i + 3)) % 10).toFloat())
-            drawCircle(
-                color = colors[i % colors.size].copy(alpha = 0.35f),
-                radius = r,
-                center = androidx.compose.ui.geometry.Offset(cx, cy)
-            )
+            val r = 3f + (((s * (i + 3)) % 8).toFloat())
+            val alpha = 0.3f + (kotlin.math.sin(sparklePhase * 6.28f + i * 0.7f).absoluteValue) * 0.45f
+
+            val color = colors[i % colors.size].copy(alpha = alpha)
+
+            if (i % 3 == 0) {
+                // Rectangle confetti
+                val rectW = r * 2.2f
+                val rectH = r * 1.2f
+                drawRect(
+                    color = color,
+                    topLeft = androidx.compose.ui.geometry.Offset(cx - rectW / 2, cy - rectH / 2),
+                    size = androidx.compose.ui.geometry.Size(rectW, rectH)
+                )
+            } else {
+                // Circle confetti
+                drawCircle(
+                    color = color,
+                    radius = r,
+                    center = androidx.compose.ui.geometry.Offset(cx, cy)
+                )
+            }
         }
     }
 }
+

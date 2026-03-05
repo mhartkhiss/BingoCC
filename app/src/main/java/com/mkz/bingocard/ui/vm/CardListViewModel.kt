@@ -28,7 +28,11 @@ data class CardListItemUi(
     val winningCellIndexes: Set<Int>,
     val waitingCellIndexes: Set<Int>,
     val isWin: Boolean,
-    val isNearWin: Boolean
+    val isNearWin: Boolean,
+    val markedCount: Int = 0,
+    val winCount: Int = 0,
+    val dynamicWinCount: Int = 0,
+    val isActive: Boolean = true
 )
 
 data class PatternChipUi(
@@ -72,9 +76,11 @@ class CardListViewModel(private val repo: BingoRepository) : ViewModel() {
                     val items = cards.mapIndexed { idx, card ->
                         val cells = cellsArray[idx].toList()
                         val progress = PatternEngine.evaluatePatterns(cells, effectivePatterns)
-                        val isWin = PatternEngine.isAnyWin(progress)
-                        val isNearWin = PatternEngine.isNearWin(progress)
-                        val highlights = PatternEngine.computeHighlights(cells, effectivePatterns)
+                        val isWin = if (card.isActive) PatternEngine.isAnyWin(progress) else false
+                        val isNearWin = if (card.isActive) PatternEngine.isNearWin(progress) else false
+                        val highlights = if (card.isActive) PatternEngine.computeHighlights(cells, effectivePatterns) else PatternEngine.PatternHighlights(emptySet(), emptySet(), 0)
+                        val marked = if (card.isActive) cells.count { it.isMarked || BingoRules.isFreeCell(it.row, it.col) } else 0
+                        
                         CardListItemUi(
                             cardId = card.id,
                             name = card.name,
@@ -83,13 +89,19 @@ class CardListViewModel(private val repo: BingoRepository) : ViewModel() {
                             winningCellIndexes = highlights.winningCellIndexes,
                             waitingCellIndexes = highlights.waitingCellIndexes,
                             isWin = isWin,
-                            isNearWin = isNearWin
+                            isNearWin = isNearWin,
+                            markedCount = marked,
+                            winCount = card.historicalWins + highlights.winCount,
+                            dynamicWinCount = highlights.winCount,
+                            isActive = card.isActive
                         )
                     }
 
                     val sorted = items.sortedWith(
-                        compareByDescending<CardListItemUi> { it.isWin }
-                            .thenByDescending { it.isNearWin }
+                        compareByDescending<CardListItemUi> { it.isActive }
+                            .thenByDescending { it.isWin }
+                            .thenByDescending { it.waitingCellIndexes.size }
+                            .thenByDescending { it.markedCount }
                     )
 
                     CardListUiState(
@@ -174,15 +186,29 @@ class CardListViewModel(private val repo: BingoRepository) : ViewModel() {
         }
     }
 
+    fun uncallNumber(value: Int) {
+        viewModelScope.launch {
+            repo.uncallNumber(value)
+        }
+    }
+
     fun deleteCard(cardId: Long) {
         viewModelScope.launch {
             repo.deleteCard(cardId)
         }
     }
 
-    fun resetAllMarks() {
+    fun setCardActive(cardId: Long, isActive: Boolean) {
         viewModelScope.launch {
-            repo.resetAllMarks()
+            repo.setCardActive(cardId, isActive)
+        }
+    }
+
+    fun resetAllMarks() {
+        val currentCards = state.value.cards
+        val winsMap = currentCards.associate { it.cardId to it.dynamicWinCount }
+        viewModelScope.launch {
+            repo.resetAllMarks(winsMap)
         }
     }
 }

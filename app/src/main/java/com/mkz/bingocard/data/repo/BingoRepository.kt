@@ -34,6 +34,15 @@ class BingoRepository(
         cardDao.deleteCard(cardId)
     }
 
+    suspend fun updateCard(card: CardEntity, cells: List<CellEntity>) {
+        cardDao.updateCardMeta(card.id, card.name, card.colorArgb, card.updatedAtEpochMs)
+        cardDao.replaceCardCells(card.id, cells, card.updatedAtEpochMs)
+    }
+
+    suspend fun setCardActive(cardId: Long, isActive: Boolean) {
+        cardDao.setCardActive(cardId, isActive)
+    }
+
     suspend fun setMarkedByValue(value: Int, isMarked: Boolean) {
         cardDao.setMarkedByValue(value, isMarked)
         if (isMarked) {
@@ -46,12 +55,23 @@ class BingoRepository(
         }
     }
 
+    suspend fun uncallNumber(value: Int) {
+        cardDao.setMarkedByValue(value, false)
+        calledNumberDao.deleteByValue(value)
+    }
+
     suspend fun setMarkedAt(cardId: Long, row: Int, col: Int, isMarked: Boolean) {
         cardDao.setMarkedAt(cardId, row, col, isMarked)
         cardDao.touchCard(cardId, System.currentTimeMillis())
     }
 
-    suspend fun resetAllMarks() {
+    @androidx.room.Transaction
+    suspend fun resetAllMarks(cardsWithWins: Map<Long, Int>) {
+        cardsWithWins.forEach { (cardId, wins) ->
+            if (wins > 0) {
+                cardDao.addHistoricalWins(cardId, wins)
+            }
+        }
         cardDao.resetAllMarks()
         calledNumberDao.clearCalledNumbers()
     }

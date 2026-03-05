@@ -20,7 +20,7 @@ import com.mkz.bingocard.data.db.entities.PatternEntity
         CalledNumberEntity::class,
         ActivePatternEntity::class
     ],
-    version = 3,
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
