@@ -50,6 +50,7 @@ private enum class DragTarget { NONE, TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_R
 fun CropScreen(
     imageUri: Uri?,
     onConfirm: (left: Float, top: Float, right: Float, bottom: Float) -> Unit,
+    onRecapture: () -> Unit,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -264,6 +265,12 @@ fun CropScreen(
                     }
                 ) {
                     Text("Reset Crop")
+                }
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    onClick = onRecapture
+                ) {
+                    Text("Re-capture")
                 }
                 Button(
                     modifier = Modifier.weight(1f),

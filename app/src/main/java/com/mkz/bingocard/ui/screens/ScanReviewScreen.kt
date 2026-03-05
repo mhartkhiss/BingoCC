@@ -9,6 +9,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Casino
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,9 +23,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.CardDefaults
@@ -35,6 +41,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
@@ -42,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import com.mkz.bingocard.domain.BingoRules
 import com.mkz.bingocard.ui.vm.ScanUiState
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,6 +59,8 @@ fun ScanReviewScreen(
     onColorChanged: (Long) -> Unit,
     onNameChanged: (String) -> Unit,
     onRandomize: () -> Unit,
+    onCameraScan: () -> Unit,
+    onPickFromGallery: () -> Unit,
     onSave: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -65,11 +75,13 @@ fun ScanReviewScreen(
 
     val selectedColor = state.cardColor?.let { Color(it.toInt()) } ?: MaterialTheme.colorScheme.primary
     val isEditing = state.editingCardId != null
+    val paletteScroll = rememberScrollState()
+    val scrollScope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (isEditing) "Edit Card" else "Review") },
+                title = { Text(if (isEditing) "Edit Card" else "Add Card") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Back")
@@ -96,26 +108,49 @@ fun ScanReviewScreen(
             )
 
             // Color palette
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                colors.forEach { cCode ->
-                    val isSelected = state.cardColor == cCode
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .background(color = Color(cCode.toInt()), shape = CircleShape)
-                            .border(
-                                width = if (isSelected) 3.dp else 1.dp,
-                                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.LightGray,
-                                shape = CircleShape
-                            )
-                            .clickable { onColorChanged(cCode) }
-                    )
+            Box(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(end = 28.dp)
+                        .horizontalScroll(paletteScroll),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    colors.forEach { cCode ->
+                        val isSelected = state.cardColor == cCode
+                        Box(
+                            modifier = Modifier
+                                .size(if (isSelected) 38.dp else 30.dp)
+                                .background(color = Color(cCode.toInt()), shape = CircleShape)
+                                .then(
+                                    if (isSelected) {
+                                        Modifier.border(
+                                            width = 3.dp,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            shape = CircleShape
+                                        )
+                                    } else Modifier
+                                )
+                                .clickable { onColorChanged(cCode) }
+                        )
+                    }
                 }
+
+                Icon(
+                    imageVector = Icons.Default.ChevronRight,
+                    contentDescription = "More colors",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (paletteScroll.value < paletteScroll.maxValue) 0.75f else 0.35f),
+                    modifier = Modifier
+                        .align(androidx.compose.ui.Alignment.CenterEnd)
+                        .clickable(enabled = paletteScroll.value < paletteScroll.maxValue) {
+                            scrollScope.launch {
+                                val step = 180
+                                val target = (paletteScroll.value + step).coerceAtMost(paletteScroll.maxValue)
+                                paletteScroll.animateScrollTo(target)
+                            }
+                        }
+                        .padding(end = 2.dp)
+                )
             }
 
             if (state.isProcessing) {
@@ -187,17 +222,61 @@ fun ScanReviewScreen(
                         }
                     }
                 }
+
+                if (!isEditing) {
+                    FilledTonalButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = onRandomize,
+                        enabled = !state.isProcessing
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Casino,
+                            contentDescription = "Randomize",
+                            modifier = Modifier.padding(end = 8.dp)
+                        )
+                        Text("Randomize Grid")
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.weight(1f))
 
             if (!isEditing) {
-                Button(
+                Text(
+                    text = "Tip: You can use Camera or Gallery below to scan a card directly.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    onClick = onRandomize,
-                    enabled = !state.isProcessing
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text("Randomize")
+                    FilledTonalButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = onCameraScan,
+                        enabled = !state.isProcessing
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CameraAlt,
+                            contentDescription = "Camera Scan",
+                            modifier = Modifier.padding(end = 8.dp)
+                        )
+                        Text("Camera")
+                    }
+
+                    FilledTonalButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = onPickFromGallery,
+                        enabled = !state.isProcessing
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PhotoLibrary,
+                            contentDescription = "Pick from Gallery",
+                            modifier = Modifier.padding(end = 8.dp)
+                        )
+                        Text("Gallery")
+                    }
                 }
             }
 

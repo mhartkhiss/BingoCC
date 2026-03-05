@@ -18,6 +18,9 @@ interface CardDao {
     @Query("SELECT * FROM cards WHERE id = :cardId")
     fun observeCard(cardId: Long): Flow<CardEntity?>
 
+    @Query("SELECT * FROM cards WHERE id = :cardId")
+    suspend fun getCard(cardId: Long): CardEntity?
+
     @Insert
     suspend fun insertCard(card: CardEntity): Long
 
@@ -33,6 +36,9 @@ interface CardDao {
     @Query("SELECT * FROM cells WHERE cardId = :cardId ORDER BY row ASC, col ASC")
     fun observeCells(cardId: Long): Flow<List<CellEntity>>
 
+    @Query("SELECT * FROM cells WHERE cardId = :cardId ORDER BY row ASC, col ASC")
+    suspend fun getCells(cardId: Long): List<CellEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertCells(cells: List<CellEntity>)
 
@@ -41,6 +47,9 @@ interface CardDao {
 
     @Query("UPDATE cells SET isMarked = :isMarked WHERE value = :value AND cardId IN (SELECT id FROM cards WHERE isActive = 1)")
     suspend fun setMarkedByValue(value: Int, isMarked: Boolean)
+
+    @Query("UPDATE cells SET isMarked = :isMarked WHERE cardId = :cardId AND value = :value")
+    suspend fun setMarkedByValueForCard(cardId: Long, value: Int, isMarked: Boolean)
 
     @Query("UPDATE cells SET isMarked = :isMarked WHERE cardId = :cardId AND row = :row AND col = :col")
     suspend fun setMarkedAt(cardId: Long, row: Int, col: Int, isMarked: Boolean)

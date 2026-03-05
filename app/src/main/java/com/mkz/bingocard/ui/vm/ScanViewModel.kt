@@ -14,10 +14,12 @@ import com.mkz.bingocard.data.db.entities.CellEntity
 import com.mkz.bingocard.data.repo.BingoRepository
 import com.mkz.bingocard.domain.BingoRules
 import com.mkz.bingocard.vision.GitHubModelsClient
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 import org.json.JSONException
 import org.json.JSONObject
@@ -44,9 +46,53 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
     private val _state = MutableStateFlow(ScanUiState())
     val state: StateFlow<ScanUiState> = _state
 
+    private var createDraftState: ScanUiState = newCreateState()
+
+    private fun newCreateState(): ScanUiState = ScanUiState(
+        imageUri = null,
+        isProcessing = false,
+        errorMessage = null,
+        grid = Array(25) { null },
+        cardColor = 0xFF42A5F5,
+        cardName = "",
+        editingCardId = null
+    )
+
+    private fun updateCreateDraftIfNeeded(updated: ScanUiState) {
+        if (updated.editingCardId == null) {
+            createDraftState = updated.copy(
+                imageUri = null,
+                isProcessing = false,
+                errorMessage = null,
+                editingCardId = null
+            )
+        }
+    }
+
+    fun startCreateDraft() {
+        _state.value = createDraftState.copy(
+            imageUri = null,
+            isProcessing = false,
+            errorMessage = null,
+            editingCardId = null
+        )
+    }
+
     /** Stores the image URI for the crop screen — no processing yet. */
     fun setImage(uri: Uri) {
-        _state.value = ScanUiState(imageUri = uri)
+        val current = _state.value
+        val next = if (current.editingCardId == null) {
+            current.copy(
+                imageUri = uri,
+                isProcessing = false,
+                errorMessage = null,
+                editingCardId = null
+            )
+        } else {
+            ScanUiState(imageUri = uri)
+        }
+        _state.value = next
+        updateCreateDraftIfNeeded(next)
     }
 
     /**
@@ -115,12 +161,14 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
                 }
 
                 if (mappedGrid != null) {
-                    _state.value = _state.value.copy(
+                    val updated = _state.value.copy(
                         isProcessing = false,
                         grid = mappedGrid,
                         cardColor = mappedColor,
                         errorMessage = null
                     )
+                    _state.value = updated
+                    updateCreateDraftIfNeeded(updated)
                 } else {
                     val errorMsg = when (lastError) {
                         is kotlinx.coroutines.TimeoutCancellationException ->
@@ -183,24 +231,21 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
     }
 
     fun onManualCreate() {
-        _state.value = ScanUiState(
-            imageUri = null,
-            isProcessing = false,
-            errorMessage = null,
-            grid = Array(25) { null },
-            cardColor = 0xFF42A5F5,
-            cardName = "",
-            editingCardId = null
-        )
+        createDraftState = newCreateState()
+        _state.value = createDraftState
     }
 
     /**
      * Loads an existing card into the review state for editing.
      */
     fun loadExistingCard(cardId: Long) {
+        _state.value = ScanUiState(
+            isProcessing = true,
+            editingCardId = cardId
+        )
         viewModelScope.launch {
-            val card = repo.observeCard(cardId).first() ?: return@launch
-            val cells = repo.observeCells(cardId).first()
+            val card = withContext(Dispatchers.IO) { repo.getCard(cardId) } ?: return@launch
+            val cells = withContext(Dispatchers.IO) { repo.getCells(cardId) }
             val grid = Array<Int?>(25) { null }
             cells.forEach { cell ->
                 val idx = cell.row * BingoRules.GRID_SIZE + cell.col
@@ -221,7 +266,9 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
     }
 
     fun updateName(name: String) {
-        _state.value = _state.value.copy(cardName = name)
+        val updated = _state.value.copy(cardName = name)
+        _state.value = updated
+        updateCreateDraftIfNeeded(updated)
     }
 
     fun randomizeGrid() {
@@ -229,11 +276,15 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
         val copy = Array<Int?>(BingoRules.GRID_SIZE * BingoRules.GRID_SIZE) { idx ->
             if (idx == 12) null else numbers[idx]
         }
-        _state.value = _state.value.copy(grid = copy)
+        val updated = _state.value.copy(grid = copy)
+        _state.value = updated
+        updateCreateDraftIfNeeded(updated)
     }
 
     fun updateColor(colorArgb: Long) {
-        _state.value = _state.value.copy(cardColor = colorArgb)
+        val updated = _state.value.copy(cardColor = colorArgb)
+        _state.value = updated
+        updateCreateDraftIfNeeded(updated)
     }
 
     private fun getBitmapFromUri(uri: Uri): Bitmap? {
@@ -259,7 +310,9 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
         val idx = row * BingoRules.GRID_SIZE + col
         val copy = _state.value.grid.copyOf()
         copy[idx] = value
-        _state.value = _state.value.copy(grid = copy)
+        val updated = _state.value.copy(grid = copy)
+        _state.value = updated
+        updateCreateDraftIfNeeded(updated)
     }
 
     /**
@@ -309,6 +362,7 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
                     colorArgb = color
                 )
                 repo.createCard(card, cells)
+                createDraftState = newCreateState()
             }
         }
     }

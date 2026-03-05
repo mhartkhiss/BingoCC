@@ -10,11 +10,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.shadow
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -43,13 +41,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.FileProvider
-import java.io.File
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Check
@@ -72,7 +67,6 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -110,13 +104,12 @@ import kotlin.math.roundToInt
 import kotlin.math.absoluteValue
 import kotlinx.coroutines.flow.StateFlow
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CardListScreen(
     stateFlow: StateFlow<CardListUiState>,
     onCardClick: (Long) -> Unit,
     onEditCard: (Long) -> Unit,
-    onGalleryClick: (android.net.Uri) -> Unit,
     onManualCreate: () -> Unit,
     onOpenDrawer: () -> Unit,
     onCallNumber: (Int) -> Unit,
@@ -126,13 +119,11 @@ fun CardListScreen(
     onToggleActive: (Long, Boolean) -> Unit
 ) {
     val state by stateFlow.collectAsState()
-    var showAddSheet by remember { mutableStateOf(false) }
     var cardToDelete by remember { mutableStateOf<Long?>(null) }
     var cardOptionsId by remember { mutableStateOf<Long?>(null) }
     var showResetConfirm by remember { mutableStateOf(false) }
     var showAlreadyCalledDialog by remember { mutableStateOf(false) }
     var alreadyCalledNumber by remember { mutableStateOf<Int?>(null) }
-    var calledNumberText by remember { mutableStateOf("") }
     var showHistorySheet by remember { mutableStateOf(false) }
     var historyFilterText by remember { mutableStateOf("") }
     var historyShowRemaining by remember { mutableStateOf(false) }
@@ -185,32 +176,6 @@ fun CardListScreen(
             gridState.animateScrollToItem(0)
         }
         lastCards = state.cards
-    }
-
-    val context = androidx.compose.ui.platform.LocalContext.current
-
-    // Camera capture: saves photo to a temp file, then sends URI to crop screen
-    val cameraImageUri = remember {
-        val file = File(context.cacheDir, "bingo_capture.jpg")
-        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-    }
-
-    val cameraLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.TakePicture()
-    ) { success ->
-        if (success) {
-            showAddSheet = false
-            onGalleryClick(cameraImageUri)
-        }
-    }
-
-    val galleryLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri ->
-        if (uri != null) {
-            showAddSheet = false
-            onGalleryClick(uri)
-        }
     }
 
     Scaffold(
@@ -279,192 +244,22 @@ fun CardListScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showAddSheet = true }) {
+                    IconButton(onClick = onManualCreate) {
                         Icon(imageVector = Icons.Default.Add, contentDescription = "Add Card")
                     }
                 }
             )
         },
         bottomBar = {
-            BottomAppBar(
-                actions = {
-                    val typedValue = calledNumberText.toIntOrNull()
-
-                    val winningGreen = Color(0xFF4CAF50)
-                    val defaultGray = Color.Gray
-                    val markedCellColor = MaterialTheme.colorScheme.primary
-
-                    val isWinningNumber = typedValue != null && typedValue !in state.calledNumbers && state.cards.any { card ->
-                        card.isActive && card.waitingCellIndexes.any { idx ->
-                            card.cells.getOrNull(idx)?.value == typedValue
-                        }
-                    }
-
-                    val isMatchingNumber = !isWinningNumber && typedValue != null && typedValue !in state.calledNumbers && state.cards.any { card ->
-                        card.isActive && card.cells.any { it.value == typedValue && !it.isMarked && !it.isFree }
-                    }
-
-                    val currentColor = when {
-                        isWinningNumber -> winningGreen
-                        isMatchingNumber -> markedCellColor
-                        else -> defaultGray
-                    }
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        // Reset button
-                        IconButton(
-                            onClick = { showResetConfirm = true },
-                            modifier = Modifier.background(Color(0xFFFF9800).copy(alpha = 0.15f), shape = androidx.compose.foundation.shape.CircleShape)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = "Reset All Marks",
-                                tint = Color(0xFFFF9800) // Orange
-                            )
-                        }
-
-                        // Undo button
-                        IconButton(
-                            onClick = { showUndoConfirm = true },
-                            enabled = state.calledNumbers.isNotEmpty()
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Undo,
-                                contentDescription = "Undo Last Call",
-                                tint = if (state.calledNumbers.isNotEmpty())
-                                    MaterialTheme.colorScheme.primary
-                                else
-                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(4.dp))
-
-                        val tryMarkCalledNumber = {
-                            if (typedValue != null && typedValue in 1..75) {
-                                if (typedValue in state.calledNumbers) {
-                                    alreadyCalledNumber = typedValue
-                                    showAlreadyCalledDialog = true
-                                } else {
-                                    onCallNumber(typedValue)
-                                    calledNumberText = ""
-                                    keyboardController?.hide()
-                                }
-                            }
-                        }
-
-                        val glowModifier = if (isWinningNumber || isMatchingNumber) {
-                            Modifier.background(Color.Transparent, androidx.compose.foundation.shape.RoundedCornerShape(26.dp))
-                                .shadow(
-                                    elevation = 16.dp, 
-                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(26.dp), 
-                                    spotColor = currentColor, 
-                                    ambientColor = currentColor
-                                )
-                        } else Modifier
-
-                        val emoji = when {
-                            typedValue == null || typedValue !in 1..75 || typedValue in state.calledNumbers -> ""
-                            isWinningNumber -> "🎉"
-                            isMatchingNumber -> "🤍"
-                            else -> "☹️"
-                        }
-
-                        OutlinedTextField(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(52.dp)
-                                .padding(end = 12.dp)
-                                .then(glowModifier),
-                            value = calledNumberText,
-                            onValueChange = { newText ->
-                                val filtered = newText.filter { it.isDigit() }.take(2)
-                                val num = filtered.toIntOrNull()
-                                if (filtered.isEmpty() || (num != null && num in 1..75)) {
-                                    calledNumberText = filtered
-                                }
-                            },
-                            textStyle = androidx.compose.material3.LocalTextStyle.current.copy(
-                                textAlign = TextAlign.Center,
-                                color = currentColor
-                            ),
-                            placeholder = { 
-                                Text(
-                                    text = "Unsay number?...",
-                                    modifier = Modifier.fillMaxWidth(),
-                                    textAlign = TextAlign.Center
-                                ) 
-                            },
-                            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = currentColor,
-                                unfocusedBorderColor = currentColor,
-                                cursorColor = currentColor
-                            ),
-                            leadingIcon = {
-                                val letter = when (typedValue) {
-                                    in 1..15 -> "B"
-                                    in 16..30 -> "I"
-                                    in 31..45 -> "N"
-                                    in 46..60 -> "G"
-                                    in 61..75 -> "O"
-                                    else -> ""
-                                }
-                                if (letter.isNotEmpty()) {
-                                    Text(
-                                        text = letter,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = currentColor,
-                                        modifier = Modifier.padding(start = 12.dp)
-                                    )
-                                } else {
-                                    Spacer(modifier = Modifier.width(28.dp)) // Avoid layout jumps
-                                }
-                            },
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Number,
-                                imeAction = ImeAction.Done
-                            ),
-                            keyboardActions = KeyboardActions(
-                                onDone = { tryMarkCalledNumber() }
-                            ),
-                            singleLine = true,
-                            shape = androidx.compose.foundation.shape.RoundedCornerShape(26.dp),
-                            trailingIcon = {
-                                if (calledNumberText.isNotEmpty()) {
-                                    IconButton(
-                                        onClick = { tryMarkCalledNumber() },
-                                        enabled = typedValue != null && typedValue in 1..75,
-                                        modifier = Modifier.size(32.dp)
-                                    ) {
-                                        if (emoji.isNotEmpty()) {
-                                            Text(text = emoji, style = MaterialTheme.typography.titleMedium)
-                                        } else {
-                                            val iconTint = if (typedValue != null && typedValue in 1..75) {
-                                                currentColor
-                                            } else {
-                                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                                            }
-                                            Icon(
-                                                imageVector = Icons.Default.Check,
-                                                contentDescription = "Mark",
-                                                tint = iconTint
-                                            )
-                                        }
-                                    }
-                                } else {
-                                    Spacer(modifier = Modifier.width(32.dp))
-                                }
-                            }
-                        )
-                    }     // Row
-                }         // Actions
+            CardListBottomBar(
+                state = state,
+                onCallNumber = onCallNumber,
+                onRequestReset = { showResetConfirm = true },
+                onRequestUndo = { showUndoConfirm = true },
+                onRepeatedNumber = { number ->
+                    alreadyCalledNumber = number
+                    showAlreadyCalledDialog = true
+                }
             )
         }
     ) { innerPadding ->
@@ -550,11 +345,9 @@ fun CardListScreen(
                             ElevatedCard(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .combinedClickable(
-                                        enabled = true,
-                                        onClick = { if (item.isActive) onCardClick(item.cardId) },
-                                        onLongClick = { cardOptionsId = item.cardId }
-                                    )
+                                    .clickable(enabled = item.isActive) {
+                                        cardOptionsId = item.cardId
+                                    }
                                     .alpha(if (item.isActive) 1f else 0.4f),
                                 colors = CardDefaults.elevatedCardColors(containerColor = container),
                                 elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
@@ -570,11 +363,44 @@ fun CardListScreen(
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text(
-                                            text = item.name,
-                                            style = MaterialTheme.typography.titleMedium,
-                                            modifier = Modifier.weight(1f)
-                                        )
+                                        Column(
+                                            modifier = Modifier.weight(1f),
+                                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Text(
+                                                text = item.name,
+                                                style = MaterialTheme.typography.titleMedium
+                                            )
+                                            if (item.isWin) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .background(Color(0xFF2E7D32), shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                                                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text(
+                                                        text = "BINGO",
+                                                        color = Color.White,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            } else if (item.waitingCellIndexes.isNotEmpty()) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .background(Color(0xFFF57C00), shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                                                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text(
+                                                        text = "${item.waitingCellIndexes.size} waiting",
+                                                        color = Color.White,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
+                                        }
                                         if (item.winCount > 0) {
                                             Box(
                                                 modifier = Modifier
@@ -624,44 +450,6 @@ fun CardListScreen(
                 }
             }
 
-            if (showAddSheet) {
-                ModalBottomSheet(
-                    onDismissRequest = { showAddSheet = false }
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text("Add card", style = MaterialTheme.typography.titleMedium)
-
-                        Button(
-                            modifier = Modifier.fillMaxWidth(),
-                            onClick = {
-                                showAddSheet = false
-                                onManualCreate()
-                            }
-                        ) {
-                            Text("Manual Entry")
-                        }
-                        Button(
-                            modifier = Modifier.fillMaxWidth(),
-                            onClick = { cameraLauncher.launch(cameraImageUri) }
-                        ) {
-                            Text("Camera ")
-                        }
-                        Button(
-                            modifier = Modifier.fillMaxWidth(),
-                            onClick = { galleryLauncher.launch("image/*") }
-                        ) {
-                            Text("Gallery")
-                        }
-
-                        Spacer(modifier = Modifier.padding(bottom = 12.dp))
-                    }
-                }
-            }
             if (showHistorySheet) {
                 Dialog(
                     onDismissRequest = {
@@ -853,19 +641,72 @@ fun CardListScreen(
             }
 
             if (cardOptionsId != null) {
-                ModalBottomSheet(
-                    onDismissRequest = { cardOptionsId = null }
+                val selectedCard = state.cards.firstOrNull { it.cardId == cardOptionsId }
+                Dialog(
+                    onDismissRequest = { cardOptionsId = null },
+                    properties = DialogProperties(
+                        dismissOnBackPress = true,
+                        dismissOnClickOutside = true,
+                        usePlatformDefaultWidth = true
+                    )
                 ) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 4.dp,
+                        shadowElevation = 8.dp
+                    ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Text("Card Options", style = MaterialTheme.typography.titleMedium)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(selectedCard?.name ?: "Card", style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    "Choose what to do with this card",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                )
+                            }
+                            IconButton(onClick = { cardOptionsId = null }) {
+                                Icon(Icons.Default.Close, contentDescription = "Close")
+                            }
+                        }
 
                         Button(
                             modifier = Modifier.fillMaxWidth(),
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                            ),
+                            onClick = {
+                                val id = cardOptionsId
+                                cardOptionsId = null
+                                if (id != null) onCardClick(id)
+                            }
+                        ) {
+                            Icon(Icons.Default.OpenInNew, contentDescription = "Open", modifier = Modifier.padding(end = 8.dp))
+                            Text("Open")
+                        }
+
+                        Button(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            ),
                             onClick = {
                                 val id = cardOptionsId
                                 cardOptionsId = null
@@ -878,7 +719,11 @@ fun CardListScreen(
 
                         Button(
                             modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer,
+                                contentColor = MaterialTheme.colorScheme.onErrorContainer
+                            ),
                             onClick = {
                                 cardToDelete = cardOptionsId
                                 cardOptionsId = null
@@ -887,8 +732,7 @@ fun CardListScreen(
                             Icon(Icons.Default.Delete, contentDescription = "Delete", modifier = Modifier.padding(end = 8.dp))
                             Text("Delete Card")
                         }
-                        
-                        Spacer(modifier = Modifier.padding(bottom = 16.dp))
+                    }
                     }
                 }
             }
@@ -921,7 +765,6 @@ fun CardListScreen(
                     confirmButton = {
                         TextButton(onClick = { 
                             onResetAll()
-                            calledNumberText = ""
                             showResetConfirm = false 
                         }) {
                             Text("Reset", color = MaterialTheme.colorScheme.error)
@@ -967,6 +810,206 @@ fun CardListScreen(
             }
         }
     }
+}
+
+@Composable
+private fun CardListBottomBar(
+    state: CardListUiState,
+    onCallNumber: (Int) -> Unit,
+    onRequestReset: () -> Unit,
+    onRequestUndo: () -> Unit,
+    onRepeatedNumber: (Int) -> Unit
+) {
+    var calledNumberText by remember { mutableStateOf("") }
+    val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+
+    BottomAppBar(
+        actions = {
+            val typedValue = calledNumberText.toIntOrNull()
+
+            val winningGreen = Color(0xFF4CAF50)
+            val defaultGray = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
+            val markedCellColor = MaterialTheme.colorScheme.primary
+            val isRepeatedNumber = typedValue != null && typedValue in state.calledNumbers
+
+            val isWinningNumber = typedValue != null && !isRepeatedNumber && state.cards.any { card ->
+                card.isActive && card.waitingCellIndexes.any { idx ->
+                    card.cells.getOrNull(idx)?.value == typedValue
+                }
+            }
+
+            val isMatchingNumber = !isWinningNumber && typedValue != null && !isRepeatedNumber && state.cards.any { card ->
+                card.isActive && card.cells.any { it.value == typedValue && !it.isMarked && !it.isFree }
+            }
+
+            val borderColor = when {
+                isWinningNumber -> winningGreen
+                isMatchingNumber -> markedCellColor
+                else -> defaultGray
+            }
+
+            val contentColor = when {
+                isWinningNumber -> winningGreen
+                isMatchingNumber -> markedCellColor
+                isRepeatedNumber -> defaultGray
+                typedValue != null -> markedCellColor
+                else -> defaultGray
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                IconButton(
+                    onClick = onRequestReset,
+                    modifier = Modifier.background(Color(0xFFFF9800).copy(alpha = 0.15f), shape = androidx.compose.foundation.shape.CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Reset All Marks",
+                        tint = Color(0xFFFF9800)
+                    )
+                }
+
+                IconButton(
+                    onClick = onRequestUndo,
+                    enabled = state.calledNumbers.isNotEmpty()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Undo,
+                        contentDescription = "Undo Last Call",
+                        tint = if (state.calledNumbers.isNotEmpty())
+                            MaterialTheme.colorScheme.primary
+                        else
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(4.dp))
+
+                val tryMarkCalledNumber = {
+                    if (typedValue != null && typedValue in 1..75) {
+                        if (typedValue in state.calledNumbers) {
+                            onRepeatedNumber(typedValue)
+                        } else {
+                            onCallNumber(typedValue)
+                            calledNumberText = ""
+                            keyboardController?.hide()
+                        }
+                    }
+                }
+
+                val glowModifier = if (isWinningNumber || isMatchingNumber) {
+                    Modifier.background(Color.Transparent, androidx.compose.foundation.shape.RoundedCornerShape(26.dp))
+                        .shadow(
+                            elevation = 16.dp,
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(26.dp),
+                            spotColor = borderColor,
+                            ambientColor = borderColor
+                        )
+                } else Modifier
+
+                val emoji = when {
+                    typedValue == null || typedValue !in 1..75 || typedValue in state.calledNumbers -> ""
+                    isWinningNumber -> "🎉"
+                    isMatchingNumber -> "🤍"
+                    else -> "☹️"
+                }
+
+                OutlinedTextField(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp)
+                        .padding(end = 12.dp)
+                        .then(glowModifier),
+                    value = calledNumberText,
+                    onValueChange = { newText ->
+                        val filtered = newText.filter { it.isDigit() }.take(2)
+                        val num = filtered.toIntOrNull()
+                        if (filtered.isEmpty() || (num != null && num in 1..75)) {
+                            calledNumberText = filtered
+                        }
+                    },
+                    textStyle = androidx.compose.material3.LocalTextStyle.current.copy(
+                        textAlign = TextAlign.Center,
+                        color = contentColor
+                    ),
+                    placeholder = {
+                        Text(
+                            text = "Unsay number?...",
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = defaultGray
+                        )
+                    },
+                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = borderColor,
+                        unfocusedBorderColor = borderColor,
+                        cursorColor = contentColor
+                    ),
+                    leadingIcon = if (typedValue != null) {
+                        {
+                            val letter = when (typedValue) {
+                                in 1..15 -> "B"
+                                in 16..30 -> "I"
+                                in 31..45 -> "N"
+                                in 46..60 -> "G"
+                                in 61..75 -> "O"
+                                else -> ""
+                            }
+                            if (letter.isNotEmpty()) {
+                                Text(
+                                    text = letter,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = contentColor,
+                                    modifier = Modifier.padding(start = 12.dp)
+                                )
+                            }
+                        }
+                    } else null,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onDone = { tryMarkCalledNumber() }
+                    ),
+                    singleLine = true,
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(26.dp),
+                    trailingIcon = if (calledNumberText.isNotEmpty()) {
+                        {
+                            IconButton(
+                                onClick = { tryMarkCalledNumber() },
+                                enabled = typedValue != null && typedValue in 1..75,
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                if (emoji.isNotEmpty()) {
+                                    Text(text = emoji, style = MaterialTheme.typography.titleMedium)
+                                } else {
+                                    val iconTint = if (typedValue != null && typedValue in 1..75) {
+                                        contentColor
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                    }
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Mark",
+                                        tint = iconTint
+                                    )
+                                }
+                            }
+                        }
+                    } else null
+                )
+            }
+        }
+    )
 }
 
 
@@ -1124,25 +1167,17 @@ private fun WinConfettiOverlay(
     modifier: Modifier,
     seed: Long
 ) {
-    val transition = rememberInfiniteTransition(label = "confetti")
+    var time by remember { mutableStateOf(0f) }
 
-    val fallPhase by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 3500, easing = LinearEasing)
-        ),
-        label = "confettiFall"
-    )
-
-    val sparklePhase by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1800, easing = LinearEasing)
-        ),
-        label = "confettiSparkle"
-    )
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        var start = 0L
+        while (true) {
+            androidx.compose.runtime.withFrameNanos { frameTime ->
+                if (start == 0L) start = frameTime
+                time = (frameTime - start) / 1_000_000_000f
+            }
+        }
+    }
 
     androidx.compose.foundation.Canvas(modifier = modifier) {
         val w = size.width
@@ -1160,15 +1195,16 @@ private fun WinConfettiOverlay(
             val x = ((s * (i + 7)) % 97) / 97f
             val y0 = ((s * (i + 19)) % 89) / 89f
             val speed = 0.3f + (((s * (i + 11)) % 100) / 100f) * 0.7f
-            val drift = (((s * (i + 29)) % 100) / 100f - 0.5f) * 0.10f
 
-            val y = ((y0 + fallPhase * speed) % 1f)
-            val cx = ((x + fallPhase * drift + kotlin.math.sin(fallPhase * 6.28f + i.toFloat()) * 0.02f).coerceIn(0f, 1f) * w)
-            val cy = (y * h)
+            val fallDistance = y0 + time * speed
+            val y = (fallDistance % 1.2f) - 0.1f
+            
+            val cx = (x + kotlin.math.sin(time * 2f + i.toFloat()) * 0.05f) * w
+            val cy = y * h
             val r = 3f + (((s * (i + 3)) % 8).toFloat())
-            val alpha = 0.3f + (kotlin.math.sin(sparklePhase * 6.28f + i * 0.7f).absoluteValue) * 0.45f
+            val alpha = 0.3f + (kotlin.math.sin(time * 3f + i * 0.7f).absoluteValue) * 0.45f
 
-            val color = colors[i % colors.size].copy(alpha = alpha)
+            val color = colors[i % colors.size].copy(alpha = alpha.coerceIn(0f, 1f))
 
             if (i % 3 == 0) {
                 // Rectangle confetti

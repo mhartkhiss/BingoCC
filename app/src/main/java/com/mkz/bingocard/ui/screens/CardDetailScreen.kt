@@ -56,6 +56,7 @@ fun CardDetailScreen(
 ) {
     val state by stateFlow.collectAsState()
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    val cellsByPosition = remember(state.cells) { state.cells.associateBy { it.row to it.col } }
 
     Scaffold(
         topBar = {
@@ -144,7 +145,7 @@ fun CardDetailScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             for (col in 0 until BingoRules.GRID_SIZE) {
-                                val cell = state.cells.firstOrNull { it.row == row && it.col == col }
+                                val cell = cellsByPosition[row to col]
                                 val isFree = BingoRules.isFreeCell(row, col)
                                 val text = if (isFree) "FREE" else cell?.value?.toString() ?: ""
                                 val marked = cell?.isMarked == true || isFree

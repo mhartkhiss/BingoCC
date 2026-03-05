@@ -19,6 +19,10 @@ class BingoRepository(
 ) {
     fun observeCards(): Flow<List<CardEntity>> = cardDao.observeCards()
 
+    suspend fun getCard(cardId: Long): CardEntity? = cardDao.getCard(cardId)
+
+    suspend fun getCells(cardId: Long): List<CellEntity> = cardDao.getCells(cardId)
+
     fun observeCard(cardId: Long): Flow<CardEntity?> = cardDao.observeCard(cardId)
 
     fun observeCells(cardId: Long): Flow<List<CellEntity>> = cardDao.observeCells(cardId)
@@ -37,6 +41,10 @@ class BingoRepository(
     suspend fun updateCard(card: CardEntity, cells: List<CellEntity>) {
         cardDao.updateCardMeta(card.id, card.name, card.colorArgb, card.updatedAtEpochMs)
         cardDao.replaceCardCells(card.id, cells, card.updatedAtEpochMs)
+        val calledValues = calledNumberDao.getCalledValues()
+        calledValues.forEach { value ->
+            cardDao.setMarkedByValueForCard(card.id, value, true)
+        }
     }
 
     suspend fun setCardActive(cardId: Long, isActive: Boolean) {

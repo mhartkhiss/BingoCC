@@ -12,6 +12,9 @@ interface CalledNumberDao {
     @Query("SELECT * FROM called_numbers ORDER BY calledAtEpochMs DESC")
     fun observeCalledNumbers(): Flow<List<CalledNumberEntity>>
 
+    @Query("SELECT value FROM called_numbers")
+    suspend fun getCalledValues(): List<Int>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertCalledNumber(called: CalledNumberEntity)
 

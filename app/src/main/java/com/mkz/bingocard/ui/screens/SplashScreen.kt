@@ -82,8 +82,22 @@ fun SplashScreen(onFinished: () -> Unit) {
     // Author fade-in (appears after typing finishes)
     val authorAlpha = remember { Animatable(0f) }
 
-    // Pick a random quote once
-    val chosen = remember { splashQuotes.random() }
+    // Pick a random quote once, making sure not to repeat the one from the last launch
+    val chosen = remember {
+        val prefs = context.getSharedPreferences("splash_prefs", android.content.Context.MODE_PRIVATE)
+        val lastIdx = prefs.getInt("last_quote_idx", -1)
+        
+        val availableIndices = if (splashQuotes.size > 1) {
+            splashQuotes.indices.filter { it != lastIdx }
+        } else {
+            splashQuotes.indices.toList()
+        }
+        
+        val newIdx = availableIndices.random()
+        prefs.edit().putInt("last_quote_idx", newIdx).apply()
+        
+        splashQuotes[newIdx]
+    }
 
     // Typing animation state
     var displayedText by remember { mutableStateOf("") }
