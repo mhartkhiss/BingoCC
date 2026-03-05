@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -13,17 +14,16 @@ import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Button
@@ -35,17 +35,22 @@ import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import com.mkz.bingocard.domain.BingoRules
 import com.mkz.bingocard.ui.vm.ScanUiState
 import kotlinx.coroutines.flow.StateFlow
@@ -75,6 +80,9 @@ fun ScanReviewScreen(
 
     val selectedColor = state.cardColor?.let { Color(it.toInt()) } ?: MaterialTheme.colorScheme.primary
     val isEditing = state.editingCardId != null
+    val hasPopulatedGrid = state.grid.any { it != null }
+    var previewDismissed by remember(state.analyzedImageUri, hasPopulatedGrid) { mutableStateOf(false) }
+    val showAnalyzedResultLayout = state.analyzedImageUri != null && hasPopulatedGrid && !previewDismissed
     val paletteScroll = rememberScrollState()
     val scrollScope = rememberCoroutineScope()
 
@@ -154,6 +162,8 @@ fun ScanReviewScreen(
             }
 
             if (state.isProcessing) {
+                val loadingPreviewUri = state.analyzedImageUri
+                val loadingPreviewSize = state.analyzedImageSizeBytes
                 Column(
                     modifier = Modifier.fillMaxWidth().padding(32.dp),
                     horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
@@ -161,6 +171,12 @@ fun ScanReviewScreen(
                 ) {
                     CircularProgressIndicator()
                     Text("Analyzing bingo card...")
+                    if (loadingPreviewUri != null && loadingPreviewSize != null) {
+                        AnalyzedImagePreview(
+                            imageUri = loadingPreviewUri,
+                            imageSizeBytes = loadingPreviewSize
+                        )
+                    }
                 }
             } else if (state.errorMessage != null) {
                 Text("Error: ${state.errorMessage}", color = MaterialTheme.colorScheme.error)
@@ -182,8 +198,8 @@ fun ScanReviewScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                            .padding(if (showAnalyzedResultLayout) 8.dp else 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(if (showAnalyzedResultLayout) 6.dp else 8.dp)
                     ) {
                         // BINGO header row
                         Row(
@@ -200,13 +216,21 @@ fun ScanReviewScreen(
                         }
 
                         for (r in 0 until BingoRules.GRID_SIZE) {
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(if (showAnalyzedResultLayout) 6.dp else 8.dp)
+                            ) {
                                 for (c in 0 until BingoRules.GRID_SIZE) {
                                     val isFree = BingoRules.isFreeCell(r, c)
                                     val idx = r * BingoRules.GRID_SIZE + c
                                     val text = if (isFree) "FREE" else (state.grid[idx]?.toString() ?: "")
                                     OutlinedTextField(
-                                        modifier = Modifier.weight(1f),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .then(
+                                                if (showAnalyzedResultLayout) Modifier.height(54.dp)
+                                                else Modifier.height(56.dp)
+                                            ),
                                         value = text,
                                         onValueChange = { new ->
                                             if (isFree) return@OutlinedTextField
@@ -223,7 +247,7 @@ fun ScanReviewScreen(
                     }
                 }
 
-                if (!isEditing) {
+                if (!isEditing && !showAnalyzedResultLayout) {
                     FilledTonalButton(
                         modifier = Modifier.fillMaxWidth(),
                         onClick = onRandomize,
@@ -237,11 +261,22 @@ fun ScanReviewScreen(
                         Text("Randomize Grid")
                     }
                 }
+
+                val analyzedPreviewUri = state.analyzedImageUri
+                val analyzedPreviewSize = state.analyzedImageSizeBytes
+                if (showAnalyzedResultLayout && analyzedPreviewUri != null && analyzedPreviewSize != null) {
+                    AnalyzedImagePreview(
+                        imageUri = analyzedPreviewUri,
+                        imageSizeBytes = analyzedPreviewSize,
+                        expanded = true,
+                        onClose = { previewDismissed = true }
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.weight(1f))
 
-            if (!isEditing) {
+            if (!isEditing && !showAnalyzedResultLayout) {
                 Text(
                     text = "Tip: You can use Camera or Gallery below to scan a card directly.",
                     style = MaterialTheme.typography.bodySmall,
@@ -280,13 +315,89 @@ fun ScanReviewScreen(
                 }
             }
 
-            Button(
-                modifier = Modifier.fillMaxWidth(),
-                onClick = onSave,
-                enabled = !state.isProcessing
-            ) {
-                Text(if (isEditing) "Update" else "Save")
+            if (showAnalyzedResultLayout) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = { previewDismissed = true },
+                        enabled = !state.isProcessing
+                    ) {
+                        Text("Retry")
+                    }
+
+                    Button(
+                        modifier = Modifier.weight(1f),
+                        onClick = onSave,
+                        enabled = !state.isProcessing
+                    ) {
+                        Text(if (isEditing) "Update" else "Save")
+                    }
+                }
+            } else {
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onSave,
+                    enabled = !state.isProcessing
+                ) {
+                    Text(if (isEditing) "Update" else "Save")
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun AnalyzedImagePreview(
+    imageUri: android.net.Uri,
+    imageSizeBytes: Long,
+    expanded: Boolean = false,
+    onClose: (() -> Unit)? = null
+) {
+    val sizeText = if (imageSizeBytes >= 1024 * 1024) {
+        String.format("%.2f MB", imageSizeBytes / (1024f * 1024f))
+    } else {
+        String.format("%.1f KB", imageSizeBytes / 1024f)
+    }
+
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Image Size · $sizeText",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (onClose != null) {
+                    IconButton(onClick = onClose) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close preview"
+                        )
+                    }
+                }
+            }
+            AsyncImage(
+                model = imageUri,
+                contentDescription = "Analyzed image preview",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(if (expanded) 170.dp else 120.dp)
+            )
         }
     }
 }

@@ -23,6 +23,8 @@ import kotlinx.coroutines.withContext
 
 import org.json.JSONException
 import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
 import kotlin.random.Random
 
 data class ScanUiState(
@@ -32,7 +34,9 @@ data class ScanUiState(
     val grid: Array<Int?> = Array(BingoRules.GRID_SIZE * BingoRules.GRID_SIZE) { null },
     val cardColor: Long? = null,
     val cardName: String = "",
-    val editingCardId: Long? = null
+    val editingCardId: Long? = null,
+    val analyzedImageUri: Uri? = null,
+    val analyzedImageSizeBytes: Long? = null
 )
 
 class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
@@ -55,7 +59,9 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
         grid = Array(25) { null },
         cardColor = 0xFF42A5F5,
         cardName = "",
-        editingCardId = null
+        editingCardId = null,
+        analyzedImageUri = null,
+        analyzedImageSizeBytes = null
     )
 
     private fun updateCreateDraftIfNeeded(updated: ScanUiState) {
@@ -86,7 +92,9 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
                 imageUri = uri,
                 isProcessing = false,
                 errorMessage = null,
-                editingCardId = null
+                editingCardId = null,
+                analyzedImageUri = null,
+                analyzedImageSizeBytes = null
             )
         } else {
             ScanUiState(imageUri = uri)
@@ -121,6 +129,14 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
 
                 // Downscale to reduce upload time and token usage
                 bitmap = downscaleBitmap(bitmap)
+
+                val analyzedImage = persistAnalyzedPreview(bitmap)
+                _state.value = _state.value.copy(
+                    analyzedImageUri = analyzedImage.first,
+                    analyzedImageSizeBytes = analyzedImage.second,
+                    isProcessing = true,
+                    errorMessage = null
+                )
 
                 val prompt = """
                     This is an image of a Bingo ticket/card.
@@ -228,6 +244,16 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
             return Pair(grid, parsedColor)
         } catch (_: JSONException) { }
         return null
+    }
+
+    private fun persistAnalyzedPreview(bitmap: Bitmap): Pair<Uri, Long> {
+        val context = appContextProvider()
+        val file = File(context.cacheDir, "analyzed_preview.jpg")
+        FileOutputStream(file).use { out ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 92, out)
+            out.flush()
+        }
+        return Pair(Uri.fromFile(file), file.length())
     }
 
     fun onManualCreate() {

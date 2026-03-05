@@ -1,13 +1,10 @@
 package com.mkz.bingocard.ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.material3.DrawerValue
-import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.remember
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
-import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -28,6 +25,7 @@ import com.mkz.bingocard.ui.screens.CardDetailScreen
 import com.mkz.bingocard.ui.screens.CardListScreen
 import com.mkz.bingocard.ui.screens.CropScreen
 import com.mkz.bingocard.ui.screens.PatternsScreen
+import com.mkz.bingocard.ui.screens.CameraCaptureScreen
 import com.mkz.bingocard.ui.screens.ScanReviewScreen
 import com.mkz.bingocard.ui.screens.SplashScreen
 import com.mkz.bingocard.ui.vm.CardDetailViewModel
@@ -41,7 +39,6 @@ import com.mkz.bingocard.ui.vm.ScanViewModelFactory
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -64,7 +61,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.Image
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.layout.ContentScale
@@ -100,20 +96,11 @@ fun BingoApp() {
     val patternsVm: PatternsViewModel = viewModel(factory = PatternsViewModelFactory(repo))
     val scanVm: ScanViewModel = viewModel(factory = ScanViewModelFactory(repo))
 
-    val cameraImageUri = remember {
-        val file = File(context.cacheDir, "bingo_capture.jpg")
-        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    val cameraImageFile = remember {
+        File(context.cacheDir, "bingo_capture.jpg")
     }
-
-    val cameraLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.TakePicture()
-    ) { success ->
-        if (success) {
-            scanVm.setImage(cameraImageUri)
-            if (navController.currentDestination?.route != Routes.Crop) {
-                navController.navigate(Routes.Crop)
-            }
-        }
+    val cameraImageUri = remember(cameraImageFile) {
+        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", cameraImageFile)
     }
 
     val galleryLauncher = rememberLauncherForActivityResult(
@@ -302,7 +289,24 @@ fun BingoApp() {
                                 popUpTo(Routes.Crop) { inclusive = true }
                             }
                         },
-                        onRecapture = { cameraLauncher.launch(cameraImageUri) },
+                        onRecapture = {
+                            navController.navigate(Routes.ScanCamera) {
+                                popUpTo(Routes.Crop) { inclusive = true }
+                            }
+                        },
+                        onBack = { navController.popBackStack() }
+                    )
+                }
+                composable(Routes.ScanCamera) {
+                    CameraCaptureScreen(
+                        outputFile = cameraImageFile,
+                        outputUri = cameraImageUri,
+                        onCaptured = { uri ->
+                            scanVm.setImage(uri)
+                            navController.navigate(Routes.Crop) {
+                                popUpTo(Routes.ScanCamera) { inclusive = true }
+                            }
+                        },
                         onBack = { navController.popBackStack() }
                     )
                 }
@@ -313,7 +317,7 @@ fun BingoApp() {
                         onColorChanged = { scanVm.updateColor(it) },
                         onNameChanged = { scanVm.updateName(it) },
                         onRandomize = { scanVm.randomizeGrid() },
-                        onCameraScan = { cameraLauncher.launch(cameraImageUri) },
+                        onCameraScan = { navController.navigate(Routes.ScanCamera) },
                         onPickFromGallery = { galleryLauncher.launch("image/*") },
                         onSave = {
                             scanVm.saveCard()
