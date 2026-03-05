@@ -42,7 +42,7 @@ data class ScanUiState(
 class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
 
     companion object {
-        private const val MAX_DIMENSION = 1024
+        private const val MAX_DIMENSION = 480
         private val GITHUB_TOKENS: List<String> =
             BuildConfig.GITHUB_TOKENS.split(",").map { it.trim() }.filter { it.isNotBlank() }
     }

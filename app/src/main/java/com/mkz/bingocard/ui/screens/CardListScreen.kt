@@ -30,6 +30,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -59,6 +61,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
@@ -78,12 +81,15 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
@@ -107,6 +113,7 @@ import kotlinx.coroutines.flow.StateFlow
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CardListScreen(
+    openHistoryRequestKey: Int = 0,
     stateFlow: StateFlow<CardListUiState>,
     onCardClick: (Long) -> Unit,
     onEditCard: (Long) -> Unit,
@@ -116,6 +123,7 @@ fun CardListScreen(
     onUncallNumber: (Int) -> Unit,
     onDeleteCard: (Long) -> Unit,
     onResetAll: () -> Unit,
+    onResetCallStats: () -> Unit,
     onToggleActive: (Long, Boolean) -> Unit
 ) {
     val state by stateFlow.collectAsState()
@@ -126,31 +134,56 @@ fun CardListScreen(
     var alreadyCalledNumber by remember { mutableStateOf<Int?>(null) }
     var showHistorySheet by remember { mutableStateOf(false) }
     var historyFilterText by remember { mutableStateOf("") }
-    var historyShowRemaining by remember { mutableStateOf(false) }
+    var historyTab by remember { mutableStateOf(HistoryTab.CALLED) }
+    var showResetStatsConfirm by remember { mutableStateOf(false) }
     var showUndoConfirm by remember { mutableStateOf(false) }
+
+    LaunchedEffect(openHistoryRequestKey) {
+        if (openHistoryRequestKey > 0) {
+            showHistorySheet = true
+            historyFilterText = ""
+            historyTab = HistoryTab.CALLED
+        }
+    }
 
     // --- Animation state for newest called-number chip ---
     val newestChipScale = remember { Animatable(1f) }
     val newestChipAlpha = remember { Animatable(1f) }
-    var prevCalledCount by remember { mutableStateOf(state.calledNumbers.size) }
+    var newestChipBorderVisible by remember { mutableStateOf(false) }
+    var hasInitializedCalledNumbers by remember { mutableStateOf(false) }
+    var prevCalledCount by remember { mutableIntStateOf(0) }
     val animScope = androidx.compose.runtime.rememberCoroutineScope()
 
-    LaunchedEffect(state.calledNumbers.size) {
+    LaunchedEffect(state.isLoading, state.calledNumbers.size) {
+        if (!hasInitializedCalledNumbers) {
+            if (!state.isLoading) {
+                // Treat restored numbers as baseline so relaunch does not animate.
+                prevCalledCount = state.calledNumbers.size
+                hasInitializedCalledNumbers = true
+            }
+            return@LaunchedEffect
+        }
+
         if (state.calledNumbers.size > prevCalledCount) {
-            // New number was just called – animate for 3 seconds
+            newestChipBorderVisible = true
+            // New number was just called.
             animScope.launch {
-                val cycles = 6          // 6 pulses × 500ms = 3 000ms
+                val cycles = 4
                 repeat(cycles) {
-                    newestChipScale.animateTo(1.35f, tween(250))
-                    newestChipScale.animateTo(1f, tween(250))
+                    newestChipScale.animateTo(1.08f, tween(180))
+                    newestChipScale.animateTo(1f, tween(180))
                 }
             }
             animScope.launch {
-                val blinks = 6
+                val blinks = 4
                 repeat(blinks) {
-                    newestChipAlpha.animateTo(0.3f, tween(250))
-                    newestChipAlpha.animateTo(1f, tween(250))
+                    newestChipAlpha.animateTo(0.85f, tween(180))
+                    newestChipAlpha.animateTo(1f, tween(180))
                 }
+            }
+            animScope.launch {
+                delay(1500)
+                newestChipBorderVisible = false
             }
         }
         prevCalledCount = state.calledNumbers.size
@@ -185,55 +218,70 @@ fun CardListScreen(
                     if (state.calledNumbers.isEmpty()) {
                         Text("Bingo Cards")
                     } else {
-                        Row(
+                        val topBarHistoryScroll = rememberScrollState()
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            // Show most recent first (calledNumbers is already DESC from DB)
-                            state.calledNumbers.take(15).forEachIndexed { index, number ->
-                                val letter = when (number) {
-                                    in 1..15 -> "B"
-                                    in 16..30 -> "I"
-                                    in 31..45 -> "N"
-                                    in 46..60 -> "G"
-                                    in 61..75 -> "O"
-                                    else -> ""
-                                }
-                                val isNewest = index == 0
-                                val chipModifier = if (isNewest) {
-                                    Modifier
-                                        .graphicsLayer {
-                                            scaleX = newestChipScale.value
-                                            scaleY = newestChipScale.value
-                                            alpha = newestChipAlpha.value
-                                        }
-                                        .shadow(
-                                            elevation = if (newestChipScale.value > 1.05f) 12.dp else 0.dp,
-                                            shape = MaterialTheme.shapes.small,
-                                            spotColor = MaterialTheme.colorScheme.primary,
-                                            ambientColor = MaterialTheme.colorScheme.primary
-                                        )
-                                } else Modifier
-                                FilterChip(
-                                    selected = false,
-                                    onClick = { showHistorySheet = true },
-                                    modifier = chipModifier,
-                                    label = {
-                                        Text(
-                                            text = "$letter$number",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        containerColor = if (isNewest && newestChipScale.value > 1.05f)
-                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
-                                        else
-                                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
-                                    )
+                                .padding(horizontal = 8.dp)
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(
+                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f)
                                 )
+                                .padding(vertical = 6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp)
+                                    .horizontalScroll(topBarHistoryScroll),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                // Keep animated edge chips away from menu/add buttons.
+                                Spacer(modifier = Modifier.width(8.dp))
+                                // Show most recent first (calledNumbers is already DESC from DB)
+                                state.calledNumbers.take(15).forEachIndexed { index, number ->
+                                    val letter = when (number) {
+                                        in 1..15 -> "B"
+                                        in 16..30 -> "I"
+                                        in 31..45 -> "N"
+                                        in 46..60 -> "G"
+                                        in 61..75 -> "O"
+                                        else -> ""
+                                    }
+                                    val isNewest = index == 0
+                                    val chipModifier = if (isNewest) {
+                                        Modifier
+                                            .graphicsLayer {
+                                                scaleX = newestChipScale.value
+                                                scaleY = newestChipScale.value
+                                                alpha = newestChipAlpha.value
+                                            }
+                                    } else Modifier
+                                    FilterChip(
+                                        selected = false,
+                                        onClick = { showHistorySheet = true },
+                                        modifier = chipModifier,
+                                        border = if (isNewest && newestChipBorderVisible) {
+                                            BorderStroke(1.5.dp, Color(0xFFFFD54F))
+                                        } else {
+                                            null
+                                        },
+                                        label = {
+                                            Text(
+                                                text = "$letter$number",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            containerColor = if (isNewest)
+                                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f)
+                                            else
+                                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                                        )
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
                             }
                         }
                     }
@@ -244,8 +292,20 @@ fun CardListScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = onManualCreate) {
-                        Icon(imageVector = Icons.Default.Add, contentDescription = "Add Card")
+                    IconButton(
+                        onClick = onManualCreate,
+                        modifier = Modifier
+                            .padding(end = 4.dp)
+                            .background(
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
+                                shape = CircleShape
+                            )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Add Card",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
                     }
                 }
             )
@@ -455,6 +515,7 @@ fun CardListScreen(
                     onDismissRequest = {
                         showHistorySheet = false
                         historyFilterText = ""
+                        historyTab = HistoryTab.CALLED
                     },
                     properties = DialogProperties(usePlatformDefaultWidth = false)
                 ) {
@@ -463,37 +524,27 @@ fun CardListScreen(
                         color = MaterialTheme.colorScheme.background
                     ) {
                         val filter = historyFilterText.trim()
-                        val filteredNumbers = remember(state.calledNumbers, filter, historyShowRemaining) {
-                            val source = if (historyShowRemaining) {
-                                (1..75).filter { it !in state.calledNumbers }
-                            } else {
-                                state.calledNumbers
+                        val sourceNumbers = remember(state.calledNumbers, historyTab) {
+                            when (historyTab) {
+                                HistoryTab.CALLED -> state.calledNumbers
+                                HistoryTab.REMAINING -> (1..75).filter { it !in state.calledNumbers }
+                                HistoryTab.STATS -> emptyList()
                             }
-
+                        }
+                        val filteredNumbers = remember(sourceNumbers, filter) {
                             if (filter.isBlank()) {
-                                source
+                                sourceNumbers
                             } else {
-                                val q = filter.lowercase()
-                                val firstChar = q.firstOrNull()
-                                val columnLetter = when (firstChar) {
-                                    'b', 'i', 'n', 'g', 'o' -> firstChar
-                                    else -> null
-                                }
-                                val digitsOnly = q.filter { it.isDigit() }
-                                val wantedValue = digitsOnly.toIntOrNull()
-
-                                source.filter { number ->
-                                    val letterMatches = when (columnLetter) {
-                                        'b' -> number in 1..15
-                                        'i' -> number in 16..30
-                                        'n' -> number in 31..45
-                                        'g' -> number in 46..60
-                                        'o' -> number in 61..75
-                                        else -> true
-                                    }
-                                    val numberMatches = wantedValue?.let { it == number } ?: number.toString().contains(digitsOnly)
-                                    letterMatches && (digitsOnly.isBlank() || numberMatches)
-                                }
+                                sourceNumbers.filter { matchesNumberQuery(it, filter) }
+                            }
+                        }
+                        val filteredStats = remember(state.calledNumberStats, filter) {
+                            val base = state.calledNumberStats.entries
+                                .sortedWith(compareByDescending<Map.Entry<Int, Int>> { it.value }.thenBy { it.key })
+                            if (filter.isBlank()) {
+                                base
+                            } else {
+                                base.filter { matchesNumberQuery(it.key, filter) }
                             }
                         }
 
@@ -528,24 +579,23 @@ fun CardListScreen(
                                     .padding(horizontal = 16.dp),
                                 verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                TabRow(
+                                    selectedTabIndex = historyTab.ordinal
                                 ) {
-                                    FilterChip(
-                                        selected = !historyShowRemaining,
-                                        onClick = { historyShowRemaining = false },
-                                        label = { Text("Called (${state.calledNumbers.size})") },
-                                        colors = FilterChipDefaults.filterChipColors(
-                                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer
-                                        )
+                                    Tab(
+                                        selected = historyTab == HistoryTab.CALLED,
+                                        onClick = { historyTab = HistoryTab.CALLED },
+                                        text = { Text("Called (${state.calledNumbers.size})") }
                                     )
-                                    FilterChip(
-                                        selected = historyShowRemaining,
-                                        onClick = { historyShowRemaining = true },
-                                        label = { Text("Remaining (${75 - state.calledNumbers.size})") },
-                                        colors = FilterChipDefaults.filterChipColors(
-                                            selectedContainerColor = Color(0xFFF57C00).copy(alpha = 0.25f)
-                                        )
+                                    Tab(
+                                        selected = historyTab == HistoryTab.REMAINING,
+                                        onClick = { historyTab = HistoryTab.REMAINING },
+                                        text = { Text("Remaining (${75 - state.calledNumbers.size})") }
+                                    )
+                                    Tab(
+                                        selected = historyTab == HistoryTab.STATS,
+                                        onClick = { historyTab = HistoryTab.STATS },
+                                        text = { Text("Stats") }
                                     )
                                 }
 
@@ -554,11 +604,90 @@ fun CardListScreen(
                                     value = historyFilterText,
                                     onValueChange = { historyFilterText = it },
                                     label = { Text("Search") },
-                                    placeholder = { Text("e.g. 12, B12, G") },
+                                    placeholder = { Text(if (historyTab == HistoryTab.STATS) "e.g. 12, B12" else "e.g. 12, B12, G") },
                                     singleLine = true
                                 )
 
-                                if (filteredNumbers.isEmpty()) {
+                                if (historyTab == HistoryTab.STATS) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.End
+                                    ) {
+                                        TextButton(onClick = { showResetStatsConfirm = true }) {
+                                            Text("Reset Stats", color = MaterialTheme.colorScheme.error)
+                                        }
+                                    }
+
+                                    if (filteredStats.isEmpty()) {
+                                        Box(
+                                            modifier = Modifier.fillMaxWidth().padding(top = 32.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = if (filter.isBlank()) "No stats yet." else "No matches.",
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    } else {
+                                        Text(
+                                            text = "${filteredStats.size} shown",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        LazyColumn(
+                                            modifier = Modifier.fillMaxSize(),
+                                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            items(filteredStats) { stat ->
+                                                val number = stat.key
+                                                val count = stat.value
+                                                val letter = bingoLetter(number)
+                                                val letterColor = bingoLetterColor(letter)
+
+                                                ElevatedCard(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    elevation = CardDefaults.elevatedCardElevation(defaultElevation = 1.dp)
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(36.dp)
+                                                                .clip(MaterialTheme.shapes.small)
+                                                                .background(letterColor.copy(alpha = 0.15f)),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Text(
+                                                                text = letter,
+                                                                style = MaterialTheme.typography.titleMedium,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = letterColor
+                                                            )
+                                                        }
+                                                        Spacer(modifier = Modifier.width(16.dp))
+                                                        Text(
+                                                            text = number.toString(),
+                                                            style = MaterialTheme.typography.titleLarge,
+                                                            fontWeight = FontWeight.Medium,
+                                                            modifier = Modifier.weight(1f)
+                                                        )
+                                                        Text(
+                                                            text = "x$count",
+                                                            style = MaterialTheme.typography.titleMedium,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = MaterialTheme.colorScheme.primary
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else if (filteredNumbers.isEmpty()) {
                                     Box(
                                         modifier = Modifier.fillMaxWidth().padding(top = 32.dp),
                                         contentAlignment = Alignment.Center
@@ -580,22 +709,8 @@ fun CardListScreen(
                                         verticalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
                                         items(filteredNumbers) { number ->
-                                            val letter = when (number) {
-                                                in 1..15 -> "B"
-                                                in 16..30 -> "I"
-                                                in 31..45 -> "N"
-                                                in 46..60 -> "G"
-                                                in 61..75 -> "O"
-                                                else -> ""
-                                            }
-                                            val letterColor = when (letter) {
-                                                "B" -> Color(0xFF1E88E5)
-                                                "I" -> Color(0xFFE53935)
-                                                "N" -> Color(0xFF43A047)
-                                                "G" -> Color(0xFFFDD835)
-                                                "O" -> Color(0xFF8E24AA)
-                                                else -> MaterialTheme.colorScheme.primary
-                                            }
+                                            val letter = bingoLetter(number)
+                                            val letterColor = bingoLetterColor(letter)
 
                                             ElevatedCard(
                                                 modifier = Modifier.fillMaxWidth(),
@@ -627,7 +742,7 @@ fun CardListScreen(
                                                         text = number.toString(),
                                                         style = MaterialTheme.typography.titleLarge,
                                                         fontWeight = FontWeight.Medium,
-                                                        color = if (historyShowRemaining) Color(0xFFF57C00) else MaterialTheme.colorScheme.onSurface
+                                                        color = if (historyTab == HistoryTab.REMAINING) Color(0xFFF57C00) else MaterialTheme.colorScheme.onSurface
                                                     )
                                                 }
                                             }
@@ -777,6 +892,26 @@ fun CardListScreen(
                     }
                 )
             }
+            if (showResetStatsConfirm) {
+                AlertDialog(
+                    onDismissRequest = { showResetStatsConfirm = false },
+                    title = { Text("Reset Number Stats") },
+                    text = { Text("Clear all called-number stats counts?") },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            onResetCallStats()
+                            showResetStatsConfirm = false
+                        }) {
+                            Text("Reset", color = MaterialTheme.colorScheme.error)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showResetStatsConfirm = false }) {
+                            Text("Cancel")
+                        }
+                    }
+                )
+            }
             if (showUndoConfirm && state.calledNumbers.isNotEmpty()) {
                 val lastNumber = state.calledNumbers.first() // already DESC order
                 val lastLetter = when (lastNumber) {
@@ -810,6 +945,54 @@ fun CardListScreen(
             }
         }
     }
+}
+
+private enum class HistoryTab {
+    CALLED,
+    REMAINING,
+    STATS
+}
+
+private fun bingoLetter(number: Int): String = when (number) {
+    in 1..15 -> "B"
+    in 16..30 -> "I"
+    in 31..45 -> "N"
+    in 46..60 -> "G"
+    in 61..75 -> "O"
+    else -> ""
+}
+
+private fun bingoLetterColor(letter: String): Color = when (letter) {
+    "B" -> Color(0xFF1E88E5)
+    "I" -> Color(0xFFE53935)
+    "N" -> Color(0xFF43A047)
+    "G" -> Color(0xFFFDD835)
+    "O" -> Color(0xFF8E24AA)
+    else -> Color.Unspecified
+}
+
+private fun matchesNumberQuery(number: Int, filter: String): Boolean {
+    val q = filter.trim().lowercase()
+    if (q.isBlank()) return true
+
+    val firstChar = q.firstOrNull()
+    val columnLetter = when (firstChar) {
+        'b', 'i', 'n', 'g', 'o' -> firstChar
+        else -> null
+    }
+    val digitsOnly = q.filter { it.isDigit() }
+    val wantedValue = digitsOnly.toIntOrNull()
+
+    val letterMatches = when (columnLetter) {
+        'b' -> number in 1..15
+        'i' -> number in 16..30
+        'n' -> number in 31..45
+        'g' -> number in 46..60
+        'o' -> number in 61..75
+        else -> true
+    }
+    val numberMatches = wantedValue?.let { it == number } ?: number.toString().contains(digitsOnly)
+    return letterMatches && (digitsOnly.isBlank() || numberMatches)
 }
 
 @Composable

@@ -3,11 +3,13 @@ package com.mkz.bingocard.data.db
 import androidx.room.Database
 import androidx.room.RoomDatabase
 import com.mkz.bingocard.data.db.dao.CalledNumberDao
+import com.mkz.bingocard.data.db.dao.CalledNumberStatsDao
 import com.mkz.bingocard.data.db.dao.CardDao
 import com.mkz.bingocard.data.db.dao.ActivePatternDao
 import com.mkz.bingocard.data.db.dao.PatternDao
 import com.mkz.bingocard.data.db.entities.ActivePatternEntity
 import com.mkz.bingocard.data.db.entities.CalledNumberEntity
+import com.mkz.bingocard.data.db.entities.CalledNumberStatEntity
 import com.mkz.bingocard.data.db.entities.CardEntity
 import com.mkz.bingocard.data.db.entities.CellEntity
 import com.mkz.bingocard.data.db.entities.PatternEntity
@@ -18,14 +20,16 @@ import com.mkz.bingocard.data.db.entities.PatternEntity
         CellEntity::class,
         PatternEntity::class,
         CalledNumberEntity::class,
+        CalledNumberStatEntity::class,
         ActivePatternEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun cardDao(): CardDao
     abstract fun patternDao(): PatternDao
     abstract fun calledNumberDao(): CalledNumberDao
+    abstract fun calledNumberStatsDao(): CalledNumberStatsDao
     abstract fun activePatternDao(): ActivePatternDao
 }

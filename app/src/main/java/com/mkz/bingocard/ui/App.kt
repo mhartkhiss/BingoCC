@@ -9,6 +9,8 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -53,16 +55,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.ChevronLeft
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.foundation.Image
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Alignment
 import com.mkz.bingocard.R
@@ -85,7 +86,13 @@ object Routes {
 fun BingoApp() {
     val context = LocalContext.current
     val db = AppGraph.database(context)
-    val repo = BingoRepository(db.cardDao(), db.patternDao(), db.calledNumberDao(), db.activePatternDao())
+    val repo = BingoRepository(
+        db.cardDao(),
+        db.patternDao(),
+        db.calledNumberDao(),
+        db.calledNumberStatsDao(),
+        db.activePatternDao()
+    )
 
     LaunchedEffect(Unit) {
         SeedRepository.seedPresetsIfNeeded(repo)
@@ -116,6 +123,7 @@ fun BingoApp() {
     val scope = rememberCoroutineScope()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
+    var historyRequestKey by remember { mutableIntStateOf(0) }
 
     BackHandler(enabled = drawerState.isOpen) {
         scope.launch { drawerState.close() }
@@ -123,7 +131,7 @@ fun BingoApp() {
 
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = false,
+        gesturesEnabled = true,
         drawerContent = {
             ModalDrawerSheet(
                 modifier = Modifier
@@ -158,15 +166,42 @@ fun BingoApp() {
                                 contentDescription = null
                             )
                         },
-                        label = { Text("Cards") },
+                        label = { Text(stringResource(id = R.string.sidebar_cards)) },
                         selected = currentRoute == Routes.Cards,
                         onClick = {
-                            navController.navigate(Routes.Cards) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
+                            if (currentRoute != Routes.Cards) {
+                                navController.navigate(Routes.Cards) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
                                 }
-                                launchSingleTop = true
-                                restoreState = true
+                            }
+                            scope.launch { drawerState.close() }
+                        },
+                        modifier = Modifier.padding(horizontal = 12.dp)
+                    )
+
+                    NavigationDrawerItem(
+                        icon = {
+                            Icon(
+                                imageVector = Icons.Default.History,
+                                contentDescription = null
+                            )
+                        },
+                        label = { Text(stringResource(id = R.string.sidebar_history)) },
+                        selected = false,
+                        onClick = {
+                            historyRequestKey++
+                            if (currentRoute != Routes.Cards) {
+                                navController.navigate(Routes.Cards) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
                             }
                             scope.launch { drawerState.close() }
                         },
@@ -180,15 +215,17 @@ fun BingoApp() {
                                 contentDescription = null
                             )
                         },
-                        label = { Text("Win Patterns") },
+                        label = { Text(stringResource(id = R.string.sidebar_win_patterns)) },
                         selected = currentRoute == Routes.Patterns,
                         onClick = {
-                            navController.navigate(Routes.Patterns) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
+                            if (currentRoute != Routes.Patterns) {
+                                navController.navigate(Routes.Patterns) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
                                 }
-                                launchSingleTop = true
-                                restoreState = true
                             }
                             scope.launch { drawerState.close() }
                         },
@@ -211,19 +248,6 @@ fun BingoApp() {
                     )
                 }
 
-                IconButton(
-                    onClick = { scope.launch { drawerState.close() } },
-                    modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .padding(end = 12.dp)
-                        .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ChevronLeft,
-                        contentDescription = "Collapse Sidebar",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
             }
         }
         }
@@ -248,6 +272,7 @@ fun BingoApp() {
                 }
                 composable(Routes.Cards) {
                     CardListScreen(
+                        openHistoryRequestKey = historyRequestKey,
                         stateFlow = cardsVm.state,
                         onCardClick = { navController.navigate(Routes.cardDetail(it)) },
                         onEditCard = { cardId ->
@@ -263,6 +288,7 @@ fun BingoApp() {
                         onUncallNumber = { cardsVm.uncallNumber(it) },
                         onDeleteCard = { cardsVm.deleteCard(it) },
                         onResetAll = { cardsVm.resetAllMarks() },
+                        onResetCallStats = { cardsVm.clearCalledNumberStats() },
                         onToggleActive = { id, isActive -> cardsVm.setCardActive(id, isActive) }
                     )
                 }

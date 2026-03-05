@@ -45,6 +45,7 @@ data class CardListUiState(
     val cards: List<CardListItemUi> = emptyList(),
     val patterns: List<PatternChipUi> = emptyList(),
     val calledNumbers: List<Int> = emptyList(),
+    val calledNumberStats: Map<Int, Int> = emptyMap(),
     val isLoading: Boolean = true,
     val onTogglePattern: (patternId: Long, active: Boolean) -> Unit = { _, _ -> }
 )
@@ -56,17 +57,25 @@ class CardListViewModel(private val repo: BingoRepository) : ViewModel() {
         repo.observeCards(),
         repo.observePatterns(),
         repo.observeActivePatterns(),
-        repo.observeCalledNumbers()
-    ) { cards, patterns, active, calledNumbers ->
-        Quad(cards, patterns, active.map { it.patternId }.toSet(), calledNumbers.map { it.value })
+        repo.observeCalledNumbers(),
+        repo.observeCalledNumberStats()
+    ) { cards, patterns, active, calledNumbers, calledStats ->
+        Quint(
+            cards,
+            patterns,
+            active.map { it.patternId }.toSet(),
+            calledNumbers.map { it.value },
+            calledStats.associate { it.value to it.callCount }
+        )
     }
-        .flatMapLatest { (cards, patterns, activeIds, calledNumbers) ->
+        .flatMapLatest { (cards, patterns, activeIds, calledNumbers, calledStats) ->
             if (cards.isEmpty()) {
                 MutableStateFlow(
                     CardListUiState(
                         cards = emptyList(),
                         patterns = patterns.toChips(activeIds),
                         calledNumbers = calledNumbers,
+                        calledNumberStats = calledStats,
                         isLoading = false,
                         onTogglePattern = ::togglePattern
                     )
@@ -110,6 +119,7 @@ class CardListViewModel(private val repo: BingoRepository) : ViewModel() {
                         cards = sorted,
                         patterns = patterns.toChips(activeIds),
                         calledNumbers = calledNumbers,
+                        calledNumberStats = calledStats,
                         isLoading = false,
                         onTogglePattern = ::togglePattern
                     )
@@ -123,6 +133,14 @@ class CardListViewModel(private val repo: BingoRepository) : ViewModel() {
         val second: B,
         val third: C,
         val fourth: D
+    )
+
+    private data class Quint<A, B, C, D, E>(
+        val first: A,
+        val second: B,
+        val third: C,
+        val fourth: D,
+        val fifth: E
     )
 
     private fun List<PatternEntity>.filterActive(activeIds: Set<Long>): List<PatternEntity> {
@@ -212,6 +230,12 @@ class CardListViewModel(private val repo: BingoRepository) : ViewModel() {
         val winsMap = currentCards.associate { it.cardId to it.dynamicWinCount }
         viewModelScope.launch {
             repo.resetAllMarks(winsMap)
+        }
+    }
+
+    fun clearCalledNumberStats() {
+        viewModelScope.launch {
+            repo.clearCalledNumberStats()
         }
     }
 }

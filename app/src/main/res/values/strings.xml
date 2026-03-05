@@ -1,3 +1,6 @@
 <resources>
     <string name="app_name">BingoMKZ</string>
+    <string name="sidebar_cards">Cards</string>
+    <string name="sidebar_history">History</string>
+    <string name="sidebar_win_patterns">Win Patterns</string>
 </resources>

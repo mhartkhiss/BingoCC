@@ -27,13 +27,27 @@ object AppGraph {
                     db.execSQL("ALTER TABLE cards ADD COLUMN isActive INTEGER NOT NULL DEFAULT 1")
                 }
             }
+            val MIGRATION_5_6 = object : Migration(5, 6) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL(
+                        """
+                        CREATE TABLE IF NOT EXISTS called_number_stats (
+                            value INTEGER NOT NULL,
+                            callCount INTEGER NOT NULL,
+                            updatedAtEpochMs INTEGER NOT NULL,
+                            PRIMARY KEY(value)
+                        )
+                        """.trimIndent()
+                    )
+                }
+            }
             
             db ?: Room.databaseBuilder(
                 context.applicationContext,
                 AppDatabase::class.java,
                 "bingocard.db"
             )
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .fallbackToDestructiveMigration(true)
                 .build()
                 .also { db = it }

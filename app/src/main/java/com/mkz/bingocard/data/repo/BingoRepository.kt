@@ -1,11 +1,13 @@
 package com.mkz.bingocard.data.repo
 
 import com.mkz.bingocard.data.db.dao.CalledNumberDao
+import com.mkz.bingocard.data.db.dao.CalledNumberStatsDao
 import com.mkz.bingocard.data.db.dao.CardDao
 import com.mkz.bingocard.data.db.dao.ActivePatternDao
 import com.mkz.bingocard.data.db.dao.PatternDao
 import com.mkz.bingocard.data.db.entities.ActivePatternEntity
 import com.mkz.bingocard.data.db.entities.CalledNumberEntity
+import com.mkz.bingocard.data.db.entities.CalledNumberStatEntity
 import com.mkz.bingocard.data.db.entities.CardEntity
 import com.mkz.bingocard.data.db.entities.CellEntity
 import com.mkz.bingocard.data.db.entities.PatternEntity
@@ -15,6 +17,7 @@ class BingoRepository(
     private val cardDao: CardDao,
     private val patternDao: PatternDao,
     private val calledNumberDao: CalledNumberDao,
+    private val calledNumberStatsDao: CalledNumberStatsDao,
     private val activePatternDao: ActivePatternDao
 ) {
     fun observeCards(): Flow<List<CardEntity>> = cardDao.observeCards()
@@ -54,12 +57,16 @@ class BingoRepository(
     suspend fun setMarkedByValue(value: Int, isMarked: Boolean) {
         cardDao.setMarkedByValue(value, isMarked)
         if (isMarked) {
+            val alreadyCalled = calledNumberDao.getCalledValues().contains(value)
             calledNumberDao.upsertCalledNumber(
                 CalledNumberEntity(
                     value = value,
                     calledAtEpochMs = System.currentTimeMillis()
                 )
             )
+            if (!alreadyCalled) {
+                calledNumberStatsDao.increment(value, System.currentTimeMillis())
+            }
         }
     }
 
@@ -106,7 +113,11 @@ class BingoRepository(
 
     fun observeCalledNumbers(): Flow<List<CalledNumberEntity>> = calledNumberDao.observeCalledNumbers()
 
+    fun observeCalledNumberStats(): Flow<List<CalledNumberStatEntity>> = calledNumberStatsDao.observeStats()
+
     suspend fun clearCalledNumbers() = calledNumberDao.clearCalledNumbers()
+
+    suspend fun clearCalledNumberStats() = calledNumberStatsDao.clearStats()
 
     suspend fun countPatterns(): Int = patternDao.countPatterns()
 }
