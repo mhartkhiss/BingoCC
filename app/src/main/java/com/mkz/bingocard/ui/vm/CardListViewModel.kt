@@ -9,15 +9,17 @@ import com.mkz.bingocard.data.db.entities.PatternEntity
 import com.mkz.bingocard.data.repo.BingoRepository
 import com.mkz.bingocard.domain.BingoRules
 import com.mkz.bingocard.domain.PatternEngine
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.random.Random
 
 data class CardListItemUi(
@@ -55,83 +57,85 @@ data class CardListUiState(
 @OptIn(ExperimentalCoroutinesApi::class)
 class CardListViewModel(private val repo: BingoRepository) : ViewModel() {
 
-    val state: StateFlow<CardListUiState> = combine(
+    private val computedState = combine(
         repo.observeCards(),
         repo.observePatterns(),
         repo.observeActivePatterns(),
-        repo.observeCalledNumbers(),
-        repo.observeCalledNumberStats()
-    ) { cards, patterns, active, calledNumbers, calledStats ->
-        Quint(
+        repo.observeCalledNumbers()
+    ) { cards, patterns, active, calledNumbers ->
+        Quad(
             cards,
             patterns,
             active.map { it.patternId }.toSet(),
-            calledNumbers.map { it.value },
-            calledStats.associate { it.value to it.callCount }
+            calledNumbers.map { it.value }
         )
     }
-        .flatMapLatest { (cards, patterns, activeIds, calledNumbers, calledStats) ->
+        .flatMapLatest { (cards, patterns, activeIds, calledNumbers) ->
             if (cards.isEmpty()) {
-                MutableStateFlow(
+                flowOf(
                     CardListUiState(
                         cards = emptyList(),
                         patterns = patterns.toChips(activeIds),
                         calledNumbers = calledNumbers,
-                        calledNumberStats = calledStats,
                         isLoading = false,
                         onTogglePattern = ::togglePattern
                     )
-                ).map { it }
+                )
             } else {
                 val effectivePatterns = patterns.filterActive(activeIds)
                 val cellFlows = cards.map { card -> repo.observeCells(card.id) }
                 combine(cellFlows) { cellsArray ->
-                    val items = cards.mapIndexed { idx, card ->
-                        val cells = cellsArray[idx].toList()
-                        val progress = PatternEngine.evaluatePatterns(cells, effectivePatterns)
-                        val isWin = PatternEngine.isAnyWin(progress)
-                        val isNearWin = PatternEngine.isNearWin(progress)
-                        val highlights = PatternEngine.computeHighlights(cells, effectivePatterns)
-                        val marked = cells.count { it.isMarked || BingoRules.isFreeCell(it.row, it.col) }
-                        val pendingActiveIncrement = if (card.isActive && isWin) 1 else 0
-                        val pendingDisabledIncrement = if (!card.isActive && isWin) 1 else 0
-                        
-                        CardListItemUi(
-                            cardId = card.id,
-                            name = card.name,
-                            colorArgb = card.colorArgb,
-                            cells = cells,
-                            winningCellIndexes = highlights.winningCellIndexes,
-                            waitingCellIndexes = highlights.waitingCellIndexes,
-                            isWin = isWin,
-                            isNearWin = isNearWin,
-                            markedCount = marked,
-                            activeWinCount = card.historicalWins + pendingActiveIncrement,
-                            disabledWinCount = card.historicalWinsDisabled + pendingDisabledIncrement,
-                            pendingActiveWinIncrement = pendingActiveIncrement,
-                            pendingDisabledWinIncrement = pendingDisabledIncrement,
-                            isActive = card.isActive
+                    withContext(Dispatchers.Default) {
+                        val items = cards.mapIndexed { idx, card ->
+                            val cells = cellsArray[idx].toList()
+                            val analysis = PatternEngine.analyzeCard(cells, effectivePatterns)
+                            val marked = cells.count { it.isMarked || BingoRules.isFreeCell(it.row, it.col) }
+                            val pendingActiveIncrement = if (card.isActive && analysis.isWin) 1 else 0
+                            val pendingDisabledIncrement = if (!card.isActive && analysis.isWin) 1 else 0
+
+                            CardListItemUi(
+                                cardId = card.id,
+                                name = card.name,
+                                colorArgb = card.colorArgb,
+                                cells = cells,
+                                winningCellIndexes = analysis.highlights.winningCellIndexes,
+                                waitingCellIndexes = analysis.highlights.waitingCellIndexes,
+                                isWin = analysis.isWin,
+                                isNearWin = analysis.isNearWin,
+                                markedCount = marked,
+                                activeWinCount = card.historicalWins + pendingActiveIncrement,
+                                disabledWinCount = card.historicalWinsDisabled + pendingDisabledIncrement,
+                                pendingActiveWinIncrement = pendingActiveIncrement,
+                                pendingDisabledWinIncrement = pendingDisabledIncrement,
+                                isActive = card.isActive
+                            )
+                        }
+
+                        val sorted = items.sortedWith(
+                            compareByDescending<CardListItemUi> { it.isActive }
+                                .thenByDescending { it.isActive && it.isWin }
+                                .thenByDescending { if (it.isActive) it.waitingCellIndexes.size else 0 }
+                                .thenByDescending { if (it.isActive) it.markedCount else 0 }
+                        )
+
+                        CardListUiState(
+                            cards = sorted,
+                            patterns = patterns.toChips(activeIds),
+                            calledNumbers = calledNumbers,
+                            isLoading = false,
+                            onTogglePattern = ::togglePattern
                         )
                     }
-
-                    val sorted = items.sortedWith(
-                        compareByDescending<CardListItemUi> { it.isActive }
-                            .thenByDescending { it.isActive && it.isWin }
-                            .thenByDescending { if (it.isActive) it.waitingCellIndexes.size else 0 }
-                            .thenByDescending { if (it.isActive) it.markedCount else 0 }
-                    )
-
-                    CardListUiState(
-                        cards = sorted,
-                        patterns = patterns.toChips(activeIds),
-                        calledNumbers = calledNumbers,
-                        calledNumberStats = calledStats,
-                        isLoading = false,
-                        onTogglePattern = ::togglePattern
-                    )
                 }
             }
         }
+
+    val state: StateFlow<CardListUiState> = combine(
+        computedState,
+        repo.observeCalledNumberStats().map { stats -> stats.associate { it.value to it.callCount } }
+    ) { uiState, calledStats ->
+        uiState.copy(calledNumberStats = calledStats)
+    }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CardListUiState())
 
     private data class Quad<A, B, C, D>(
@@ -139,14 +143,6 @@ class CardListViewModel(private val repo: BingoRepository) : ViewModel() {
         val second: B,
         val third: C,
         val fourth: D
-    )
-
-    private data class Quint<A, B, C, D, E>(
-        val first: A,
-        val second: B,
-        val third: C,
-        val fourth: D,
-        val fifth: E
     )
 
     private fun List<PatternEntity>.filterActive(activeIds: Set<Long>): List<PatternEntity> {

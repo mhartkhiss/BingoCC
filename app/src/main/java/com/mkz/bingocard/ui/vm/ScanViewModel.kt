@@ -46,6 +46,12 @@ data class CropBounds(
     val bottom: Float
 )
 
+private data class PreparedScanImage(
+    val bitmap: Bitmap,
+    val previewUri: Uri,
+    val previewSizeBytes: Long
+)
+
 class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
 
     companion object {
@@ -145,26 +151,16 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
 
         viewModelScope.launch {
             try {
-                var bitmap = getBitmapFromUri(uri)
-                if (bitmap == null) {
+                val preparedImage = withContext(Dispatchers.IO) {
+                    prepareScanImage(uri, cropBounds)
+                }
+                if (preparedImage == null) {
                     _state.value = _state.value.copy(isProcessing = false, errorMessage = "Failed to open image")
                     return@launch
                 }
-
-                // Apply crop
-                val cropX = (left * bitmap.width).toInt().coerceIn(0, bitmap.width)
-                val cropY = (top * bitmap.height).toInt().coerceIn(0, bitmap.height)
-                val cropW = ((right - left) * bitmap.width).toInt().coerceIn(1, bitmap.width - cropX)
-                val cropH = ((bottom - top) * bitmap.height).toInt().coerceIn(1, bitmap.height - cropY)
-                bitmap = Bitmap.createBitmap(bitmap, cropX, cropY, cropW, cropH)
-
-                // Downscale to reduce upload time and token usage
-                bitmap = downscaleBitmap(bitmap)
-
-                val analyzedImage = persistAnalyzedPreview(bitmap)
                 _state.value = _state.value.copy(
-                    analyzedImageUri = analyzedImage.first,
-                    analyzedImageSizeBytes = analyzedImage.second,
+                    analyzedImageUri = preparedImage.previewUri,
+                    analyzedImageSizeBytes = preparedImage.previewSizeBytes,
                     isProcessing = true,
                     errorMessage = null
                 )
@@ -175,21 +171,27 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
                 var mappedGrid: Array<Int?>? = null
                 var mappedColor: Long? = null
 
-                for (token in tokensForCurrentRequest()) {
-                    try {
-                        val respText = GitHubModelsClient.analyzeImage(
-                            token = token,
-                            bitmap = bitmap,
-                            prompt = prompt
-                        ).trim()
+                try {
+                    for (token in tokensForCurrentRequest()) {
+                        try {
+                            val respText = GitHubModelsClient.analyzeImage(
+                                token = token,
+                                bitmap = preparedImage.bitmap,
+                                prompt = prompt
+                            ).trim()
 
-                        val result = BingoCardAiResponseParser.parse(respText)
-                        mappedGrid = result.grid
-                        mappedColor = result.colorArgb
-                        break
-                    } catch (t: Throwable) {
-                        t.printStackTrace()
-                        lastError = t
+                            val result = BingoCardAiResponseParser.parse(respText)
+                            mappedGrid = result.grid
+                            mappedColor = result.colorArgb
+                            break
+                        } catch (t: Throwable) {
+                            t.printStackTrace()
+                            lastError = t
+                        }
+                    }
+                } finally {
+                    if (!preparedImage.bitmap.isRecycled) {
+                        preparedImage.bitmap.recycle()
                     }
                 }
 
@@ -235,6 +237,45 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
         val newW = (w * scale).toInt().coerceAtLeast(1)
         val newH = (h * scale).toInt().coerceAtLeast(1)
         return Bitmap.createScaledBitmap(bitmap, newW, newH, true)
+    }
+
+    private fun prepareScanImage(uri: Uri, cropBounds: CropBounds): PreparedScanImage? {
+        val sourceBitmap = getBitmapFromUri(uri) ?: return null
+        var workingBitmap = sourceBitmap
+        try {
+            val cropX = (cropBounds.left * sourceBitmap.width).toInt().coerceIn(0, sourceBitmap.width)
+            val cropY = (cropBounds.top * sourceBitmap.height).toInt().coerceIn(0, sourceBitmap.height)
+            val cropW = ((cropBounds.right - cropBounds.left) * sourceBitmap.width)
+                .toInt()
+                .coerceIn(1, sourceBitmap.width - cropX)
+            val cropH = ((cropBounds.bottom - cropBounds.top) * sourceBitmap.height)
+                .toInt()
+                .coerceIn(1, sourceBitmap.height - cropY)
+
+            val croppedBitmap = Bitmap.createBitmap(sourceBitmap, cropX, cropY, cropW, cropH)
+            if (croppedBitmap !== sourceBitmap && !sourceBitmap.isRecycled) {
+                sourceBitmap.recycle()
+            }
+            workingBitmap = croppedBitmap
+
+            val resizedBitmap = downscaleBitmap(workingBitmap)
+            if (resizedBitmap !== workingBitmap && !workingBitmap.isRecycled) {
+                workingBitmap.recycle()
+            }
+            workingBitmap = resizedBitmap
+
+            val analyzedImage = persistAnalyzedPreview(workingBitmap)
+            return PreparedScanImage(
+                bitmap = workingBitmap,
+                previewUri = analyzedImage.first,
+                previewSizeBytes = analyzedImage.second
+            )
+        } catch (t: Throwable) {
+            if (!workingBitmap.isRecycled) {
+                workingBitmap.recycle()
+            }
+            throw t
+        }
     }
 
     private fun persistAnalyzedPreview(bitmap: Bitmap): Pair<Uri, Long> {
@@ -307,8 +348,11 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
             editingCardId = cardId
         )
         viewModelScope.launch {
-            val card = withContext(Dispatchers.IO) { repo.getCard(cardId) } ?: return@launch
-            val cells = withContext(Dispatchers.IO) { repo.getCells(cardId) }
+            val loadedCard = withContext(Dispatchers.IO) {
+                val card = repo.getCard(cardId) ?: return@withContext null
+                Pair(card, repo.getCells(cardId))
+            } ?: return@launch
+            val (card, cells) = loadedCard
             val grid = Array<Int?>(25) { null }
             cells.forEach { cell ->
                 val idx = cell.row * BingoRules.GRID_SIZE + cell.col

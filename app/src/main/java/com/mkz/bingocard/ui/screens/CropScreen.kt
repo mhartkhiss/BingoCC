@@ -1,5 +1,7 @@
 package com.mkz.bingocard.ui.screens
 
+import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.compose.foundation.Canvas
@@ -25,6 +27,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +44,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.sqrt
 
 private enum class DragTarget { NONE, TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT, MOVE }
@@ -54,26 +59,18 @@ fun CropScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    var bitmap by remember(imageUri) { mutableStateOf<Bitmap?>(null) }
+    var isLoading by remember(imageUri) { mutableStateOf(imageUri != null) }
 
-    val bitmap = remember(imageUri) {
-        imageUri?.let { uri ->
-            try {
-                // Get dimensions first
-                val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                context.contentResolver.openInputStream(uri)?.use {
-                    BitmapFactory.decodeStream(it, null, opts)
-                }
-                // Downsample for display if very large
-                val maxDim = maxOf(opts.outWidth, opts.outHeight)
-                val sampleSize = maxOf(1, maxDim / 2048)
-                val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
-                context.contentResolver.openInputStream(uri)?.use {
-                    BitmapFactory.decodeStream(it, null, decodeOpts)
-                }
-            } catch (e: Exception) {
-                null
+    LaunchedEffect(imageUri) {
+        bitmap = null
+        isLoading = imageUri != null
+        bitmap = imageUri?.let { uri ->
+            withContext(Dispatchers.IO) {
+                loadCropPreviewBitmap(context, uri)
             }
         }
+        isLoading = false
     }
 
     // Crop rectangle in normalized coordinates (0.0 - 1.0)
@@ -107,9 +104,17 @@ fun CropScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            if (bitmap != null) {
-                val imgBitmap = remember(bitmap) { bitmap.asImageBitmap() }
-                val aspectRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
+            if (isLoading) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("Loading image...", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else if (bitmap != null) {
+                val loadedBitmap = bitmap ?: return@Column
+                val imgBitmap = remember(loadedBitmap) { loadedBitmap.asImageBitmap() }
+                val aspectRatio = loadedBitmap.width.toFloat() / loadedBitmap.height.toFloat()
 
                 Box(
                     modifier = Modifier
@@ -281,5 +286,23 @@ fun CropScreen(
                 }
             }
         }
+    }
+}
+
+private fun loadCropPreviewBitmap(context: Context, uri: Uri): Bitmap? {
+    return try {
+        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        context.contentResolver.openInputStream(uri)?.use {
+            BitmapFactory.decodeStream(it, null, opts)
+        }
+
+        val maxDim = maxOf(opts.outWidth, opts.outHeight)
+        val sampleSize = maxOf(1, maxDim / 2048)
+        val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+        context.contentResolver.openInputStream(uri)?.use {
+            BitmapFactory.decodeStream(it, null, decodeOpts)
+        }
+    } catch (_: Exception) {
+        null
     }
 }

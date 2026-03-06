@@ -17,26 +17,97 @@ object PatternEngine {
         val winCount: Int
     )
 
-    fun evaluatePatterns(
+    data class CardAnalysis(
+        val progress: List<PatternProgress>,
+        val highlights: PatternHighlights,
+        val isWin: Boolean,
+        val isNearWin: Boolean
+    )
+
+    fun analyzeCard(
         cells: List<CellEntity>,
         patterns: List<PatternEntity>
-    ): List<PatternProgress> {
+    ): CardAnalysis {
         val marked = BooleanArray(BingoRules.GRID_SIZE * BingoRules.GRID_SIZE)
         for (cell in cells) {
             val idx = cell.row * BingoRules.GRID_SIZE + cell.col
             marked[idx] = cell.isMarked || cell.isFree
         }
 
-        return patterns.map { pattern ->
+        val progress = ArrayList<PatternProgress>(patterns.size)
+        val winning = LinkedHashSet<Int>()
+        val waiting = LinkedHashSet<Int>()
+        var winCount = 0
+        var hasWin = false
+        var hasNearWin = false
+
+        for (pattern in patterns) {
             val expandedMasks = expandToMasks(pattern)
-            val bestMissing = expandedMasks.minOfOrNull { missingCount(it, marked) } ?: Int.MAX_VALUE
-            PatternProgress(
-                patternId = pattern.id,
-                patternName = pattern.name,
-                missingCount = bestMissing,
-                isWin = bestMissing == 0
+            var bestMissing = Int.MAX_VALUE
+            val bestMasks = ArrayList<Long>(expandedMasks.size)
+
+            for (mask in expandedMasks) {
+                val missing = missingCount(mask, marked)
+                if (missing == 0) {
+                    winCount++
+                    hasWin = true
+                }
+                when {
+                    missing < bestMissing -> {
+                        bestMissing = missing
+                        bestMasks.clear()
+                        bestMasks.add(mask)
+                    }
+                    missing == bestMissing -> bestMasks.add(mask)
+                }
+            }
+
+            progress.add(
+                PatternProgress(
+                    patternId = pattern.id,
+                    patternName = pattern.name,
+                    missingCount = bestMissing,
+                    isWin = bestMissing == 0
+                )
             )
+
+            if (bestMissing == 0) {
+                for (mask in bestMasks) {
+                    for (idx in 0 until BingoRules.GRID_SIZE * BingoRules.GRID_SIZE) {
+                        if (mask and (1L shl idx) != 0L) {
+                            winning.add(idx)
+                        }
+                    }
+                }
+            } else if (bestMissing == 1) {
+                hasNearWin = true
+                for (mask in bestMasks) {
+                    for (idx in 0 until BingoRules.GRID_SIZE * BingoRules.GRID_SIZE) {
+                        if (mask and (1L shl idx) != 0L && !marked[idx]) {
+                            waiting.add(idx)
+                        }
+                    }
+                }
+            }
         }
+
+        return CardAnalysis(
+            progress = progress,
+            highlights = PatternHighlights(
+                winningCellIndexes = winning,
+                waitingCellIndexes = waiting,
+                winCount = winCount
+            ),
+            isWin = hasWin,
+            isNearWin = hasNearWin
+        )
+    }
+
+    fun evaluatePatterns(
+        cells: List<CellEntity>,
+        patterns: List<PatternEntity>
+    ): List<PatternProgress> {
+        return analyzeCard(cells, patterns).progress
     }
 
     fun isNearWin(progress: List<PatternProgress>): Boolean {
@@ -51,60 +122,7 @@ object PatternEngine {
         cells: List<CellEntity>,
         patterns: List<PatternEntity>
     ): PatternHighlights {
-        val marked = BooleanArray(BingoRules.GRID_SIZE * BingoRules.GRID_SIZE)
-        for (cell in cells) {
-            val idx = cell.row * BingoRules.GRID_SIZE + cell.col
-            marked[idx] = cell.isMarked || cell.isFree
-        }
-
-        val winning = LinkedHashSet<Int>()
-        val waiting = LinkedHashSet<Int>()
-        var winCount = 0
-
-        for (pattern in patterns) {
-            val expandedMasks = expandToMasks(pattern)
-            var bestMissing = Int.MAX_VALUE
-            val bestMasks = ArrayList<Long>()
-
-            for (mask in expandedMasks) {
-                val missing = missingCount(mask, marked)
-                if (missing == 0) {
-                    winCount++
-                }
-                when {
-                    missing < bestMissing -> {
-                        bestMissing = missing
-                        bestMasks.clear()
-                        bestMasks.add(mask)
-                    }
-                    missing == bestMissing -> bestMasks.add(mask)
-                }
-            }
-
-            if (bestMissing == 0) {
-                for (mask in bestMasks) {
-                    for (idx in 0 until BingoRules.GRID_SIZE * BingoRules.GRID_SIZE) {
-                        if (mask and (1L shl idx) != 0L) {
-                            winning.add(idx)
-                        }
-                    }
-                }
-            } else if (bestMissing == 1) {
-                for (mask in bestMasks) {
-                    for (idx in 0 until BingoRules.GRID_SIZE * BingoRules.GRID_SIZE) {
-                        if (mask and (1L shl idx) != 0L && !marked[idx]) {
-                            waiting.add(idx)
-                        }
-                    }
-                }
-            }
-        }
-
-        return PatternHighlights(
-            winningCellIndexes = winning,
-            waitingCellIndexes = waiting,
-            winCount = winCount
-        )
+        return analyzeCard(cells, patterns).highlights
     }
 
     private fun missingCount(mask: Long, marked: BooleanArray): Int {

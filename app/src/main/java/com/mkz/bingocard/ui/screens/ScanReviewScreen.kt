@@ -20,8 +20,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -91,6 +93,7 @@ fun ScanReviewScreen(
     var previewDismissed by remember(state.analyzedImageUri, hasPopulatedGrid) { mutableStateOf(false) }
     val showAnalyzedResultLayout = state.analyzedImageUri != null && hasPopulatedGrid && !previewDismissed
     val paletteScroll = rememberScrollState()
+    val contentScroll = rememberScrollState()
     val scrollScope = rememberCoroutineScope()
 
     Scaffold(
@@ -119,259 +122,291 @@ fun ScanReviewScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Card name input
-            OutlinedTextField(
-                modifier = Modifier.fillMaxWidth(),
-                value = state.cardName,
-                onValueChange = onNameChanged,
-                label = { Text("Card Name") },
-                placeholder = { Text("e.g. Card 9-21") },
-                singleLine = true
-            )
-
-            // Color palette
-            Box(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(end = 28.dp)
-                        .horizontalScroll(paletteScroll),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    colors.forEach { cCode ->
-                        val isSelected = state.cardColor == cCode
-                        Box(
-                            modifier = Modifier
-                                .size(if (isSelected) 38.dp else 30.dp)
-                                .background(color = Color(cCode.toInt()), shape = CircleShape)
-                                .then(
-                                    if (isSelected) {
-                                        Modifier.border(
-                                            width = 3.dp,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            shape = CircleShape
-                                        )
-                                    } else Modifier
-                                )
-                                .clickable { onColorChanged(cCode) }
-                        )
-                    }
-                }
-
-                Icon(
-                    imageVector = Icons.Default.ChevronRight,
-                    contentDescription = "More colors",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (paletteScroll.value < paletteScroll.maxValue) 0.75f else 0.35f),
-                    modifier = Modifier
-                        .align(androidx.compose.ui.Alignment.CenterEnd)
-                        .clickable(enabled = paletteScroll.value < paletteScroll.maxValue) {
-                            scrollScope.launch {
-                                val step = 180
-                                val target = (paletteScroll.value + step).coerceAtMost(paletteScroll.maxValue)
-                                paletteScroll.animateScrollTo(target)
-                            }
-                        }
-                        .padding(end = 2.dp)
-                )
-            }
-
-            if (state.isProcessing) {
-                val loadingPreviewUri = state.analyzedImageUri
-                val loadingPreviewSize = state.analyzedImageSizeBytes
-                Column(
-                    modifier = Modifier.fillMaxWidth().padding(32.dp),
-                    horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    CircularProgressIndicator()
-                    Text("Analyzing bingo card...")
-                    if (loadingPreviewUri != null && loadingPreviewSize != null) {
-                        AnalyzedImagePreview(
-                            imageUri = loadingPreviewUri,
-                            imageSizeBytes = loadingPreviewSize
-                        )
-                    }
-                }
-            } else if (state.errorMessage != null) {
-                val errorMessage = state.errorMessage
-                val analyzedImageUri = state.analyzedImageUri
-                val analyzedImageSize = state.analyzedImageSizeBytes
-                Column(
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(contentScroll),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Card name input
+                OutlinedTextField(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text(errorMessage.orEmpty(), color = MaterialTheme.colorScheme.error)
-                    if (analyzedImageUri != null && analyzedImageSize != null) {
-                        AnalyzedImagePreview(
-                            imageUri = analyzedImageUri,
-                            imageSizeBytes = analyzedImageSize,
-                            expanded = true
-                        )
-                    }
-                    if (canRetryScan) {
-                        OutlinedButton(
-                            modifier = Modifier.fillMaxWidth(),
-                            onClick = onRetryScan,
-                            enabled = !state.isProcessing
-                        ) {
-                            Text(stringResource(R.string.scan_retry_same_image))
-                        }
-                    }
-                }
-            } else {
-                // Card with colored border matching selected color
-                ElevatedCard(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(
-                            width = 3.dp,
-                            color = selectedColor,
-                            shape = RoundedCornerShape(12.dp)
-                        ),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.elevatedCardColors(
-                        containerColor = selectedColor.copy(alpha = 0.06f)
-                    )
-                ) {
-                    Column(
+                    value = state.cardName,
+                    onValueChange = onNameChanged,
+                    label = { Text("Card Name") },
+                    placeholder = { Text("e.g. Card 9-21") },
+                    singleLine = true
+                )
+
+                // Color palette
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(if (showAnalyzedResultLayout) 8.dp else 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(if (showAnalyzedResultLayout) 6.dp else 8.dp)
+                            .padding(end = 28.dp)
+                            .horizontalScroll(paletteScroll),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // BINGO header row
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceAround
-                        ) {
-                            listOf("B", "I", "N", "G", "O").forEach { letter ->
-                                Text(
-                                    text = letter,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = selectedColor
-                                )
+                        colors.forEach { cCode ->
+                            val isSelected = state.cardColor == cCode
+                            Box(
+                                modifier = Modifier
+                                    .size(if (isSelected) 38.dp else 30.dp)
+                                    .background(color = Color(cCode.toInt()), shape = CircleShape)
+                                    .then(
+                                        if (isSelected) {
+                                            Modifier.border(
+                                                width = 3.dp,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                shape = CircleShape
+                                            )
+                                        } else Modifier
+                                    )
+                                    .clickable { onColorChanged(cCode) }
+                            )
+                        }
+                    }
+
+                    Icon(
+                        imageVector = Icons.Default.ChevronRight,
+                        contentDescription = "More colors",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (paletteScroll.value < paletteScroll.maxValue) 0.75f else 0.35f),
+                        modifier = Modifier
+                            .align(androidx.compose.ui.Alignment.CenterEnd)
+                            .clickable(enabled = paletteScroll.value < paletteScroll.maxValue) {
+                                scrollScope.launch {
+                                    val step = 180
+                                    val target = (paletteScroll.value + step).coerceAtMost(paletteScroll.maxValue)
+                                    paletteScroll.animateScrollTo(target)
+                                }
+                            }
+                            .padding(end = 2.dp)
+                    )
+                }
+
+                if (state.isProcessing) {
+                    val loadingPreviewUri = state.analyzedImageUri
+                    val loadingPreviewSize = state.analyzedImageSizeBytes
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(32.dp),
+                        horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        CircularProgressIndicator()
+                        Text("Analyzing bingo card...")
+                        if (loadingPreviewUri != null && loadingPreviewSize != null) {
+                            AnalyzedImagePreview(
+                                imageUri = loadingPreviewUri,
+                                imageSizeBytes = loadingPreviewSize
+                            )
+                        }
+                    }
+                } else if (state.errorMessage != null) {
+                    val errorMessage = state.errorMessage
+                    val analyzedImageUri = state.analyzedImageUri
+                    val analyzedImageSize = state.analyzedImageSizeBytes
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(errorMessage.orEmpty(), color = MaterialTheme.colorScheme.error)
+                        if (analyzedImageUri != null && analyzedImageSize != null) {
+                            AnalyzedImagePreview(
+                                imageUri = analyzedImageUri,
+                                imageSizeBytes = analyzedImageSize,
+                                expanded = true
+                            )
+                        }
+                        if (canRetryScan) {
+                            OutlinedButton(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = onRetryScan,
+                                enabled = !state.isProcessing
+                            ) {
+                                Text(stringResource(R.string.scan_retry_same_image))
                             }
                         }
-
-                        for (r in 0 until BingoRules.GRID_SIZE) {
+                    }
+                } else {
+                    // Card with colored border matching selected color
+                    ElevatedCard(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(
+                                width = 3.dp,
+                                color = selectedColor,
+                                shape = RoundedCornerShape(12.dp)
+                            ),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.elevatedCardColors(
+                            containerColor = selectedColor.copy(alpha = 0.06f)
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(if (showAnalyzedResultLayout) 8.dp else 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(if (showAnalyzedResultLayout) 6.dp else 8.dp)
+                        ) {
+                            // BINGO header row
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(if (showAnalyzedResultLayout) 6.dp else 8.dp)
+                                horizontalArrangement = Arrangement.SpaceAround
                             ) {
-                                for (c in 0 until BingoRules.GRID_SIZE) {
-                                    val isFree = BingoRules.isFreeCell(r, c)
-                                    val idx = r * BingoRules.GRID_SIZE + c
-                                    val text = if (isFree) "FREE" else (state.grid[idx]?.toString() ?: "")
-                                    OutlinedTextField(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .then(
-                                                if (showAnalyzedResultLayout) Modifier.height(54.dp)
-                                                else Modifier.height(56.dp)
-                                            ),
-                                        value = text,
-                                        onValueChange = { new ->
-                                            if (isFree) return@OutlinedTextField
-                                            val parsed = new.toIntOrNull()
-                                            onCellChanged(r, c, parsed)
-                                        },
-                                        enabled = !isFree,
-                                        singleLine = true,
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                                listOf("B", "I", "N", "G", "O").forEach { letter ->
+                                    Text(
+                                        text = letter,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = selectedColor
                                     )
+                                }
+                            }
+
+                            for (r in 0 until BingoRules.GRID_SIZE) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(if (showAnalyzedResultLayout) 6.dp else 8.dp)
+                                ) {
+                                    for (c in 0 until BingoRules.GRID_SIZE) {
+                                        val isFree = BingoRules.isFreeCell(r, c)
+                                        val idx = r * BingoRules.GRID_SIZE + c
+                                        val text = if (isFree) "FREE" else (state.grid[idx]?.toString() ?: "")
+                                        OutlinedTextField(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .then(
+                                                    if (showAnalyzedResultLayout) Modifier.height(54.dp)
+                                                    else Modifier.height(56.dp)
+                                                ),
+                                            value = text,
+                                            onValueChange = { new ->
+                                                if (isFree) return@OutlinedTextField
+                                                val parsed = new.toIntOrNull()
+                                                onCellChanged(r, c, parsed)
+                                            },
+                                            enabled = !isFree,
+                                            singleLine = true,
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
+
+                    if (!isEditing && !showAnalyzedResultLayout) {
+                        FilledTonalButton(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = onRandomize,
+                            enabled = !state.isProcessing
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Casino,
+                                contentDescription = "Randomize",
+                                modifier = Modifier.padding(end = 8.dp)
+                            )
+                            Text("Randomize Grid")
+                        }
+                    }
+
+                    val analyzedPreviewUri = state.analyzedImageUri
+                    val analyzedPreviewSize = state.analyzedImageSizeBytes
+                    if (showAnalyzedResultLayout && analyzedPreviewUri != null && analyzedPreviewSize != null) {
+                        AnalyzedImagePreview(
+                            imageUri = analyzedPreviewUri,
+                            imageSizeBytes = analyzedPreviewSize,
+                            expanded = true,
+                            onClose = { previewDismissed = true }
+                        )
+                    }
                 }
 
                 if (!isEditing && !showAnalyzedResultLayout) {
-                    FilledTonalButton(
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = onRandomize,
-                        enabled = !state.isProcessing
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Casino,
-                            contentDescription = "Randomize",
-                            modifier = Modifier.padding(end = 8.dp)
-                        )
-                        Text("Randomize Grid")
-                    }
-                }
-
-                val analyzedPreviewUri = state.analyzedImageUri
-                val analyzedPreviewSize = state.analyzedImageSizeBytes
-                if (showAnalyzedResultLayout && analyzedPreviewUri != null && analyzedPreviewSize != null) {
-                    AnalyzedImagePreview(
-                        imageUri = analyzedPreviewUri,
-                        imageSizeBytes = analyzedPreviewSize,
-                        expanded = true,
-                        onClose = { previewDismissed = true }
+                    Text(
+                        text = "Tip: You can use Camera or Gallery below to scan a card directly.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                }
-            }
 
-            Spacer(modifier = Modifier.weight(1f))
-
-            if (!isEditing && !showAnalyzedResultLayout) {
-                Text(
-                    text = "Tip: You can use Camera or Gallery below to scan a card directly.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    FilledTonalButton(
-                        modifier = Modifier.weight(1f),
-                        onClick = onCameraScan,
-                        enabled = !state.isProcessing
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.CameraAlt,
-                            contentDescription = "Camera Scan",
-                            modifier = Modifier.padding(end = 8.dp)
-                        )
-                        Text("Camera")
-                    }
+                        FilledTonalButton(
+                            modifier = Modifier.weight(1f),
+                            onClick = onCameraScan,
+                            enabled = !state.isProcessing
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CameraAlt,
+                                contentDescription = "Camera Scan",
+                                modifier = Modifier.padding(end = 8.dp)
+                            )
+                            Text("Camera")
+                        }
 
-                    FilledTonalButton(
-                        modifier = Modifier.weight(1f),
-                        onClick = onPickFromGallery,
-                        enabled = !state.isProcessing
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PhotoLibrary,
-                            contentDescription = "Pick from Gallery",
-                            modifier = Modifier.padding(end = 8.dp)
-                        )
-                        Text("Gallery")
+                        FilledTonalButton(
+                            modifier = Modifier.weight(1f),
+                            onClick = onPickFromGallery,
+                            enabled = !state.isProcessing
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PhotoLibrary,
+                                contentDescription = "Pick from Gallery",
+                                modifier = Modifier.padding(end = 8.dp)
+                            )
+                            Text("Gallery")
+                        }
                     }
                 }
             }
 
             if (showAnalyzedResultLayout) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    OutlinedButton(
-                        modifier = Modifier.weight(1f),
-                        onClick = onRetryScan,
-                        enabled = !state.isProcessing && canRetryScan
-                    ) {
-                        Text(stringResource(R.string.scan_retry_same_image))
-                    }
+                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                    val useVerticalActionButtons = maxWidth < 360.dp
 
-                    Button(
-                        modifier = Modifier.weight(1f),
-                        onClick = onSave,
-                        enabled = !state.isProcessing
-                    ) {
-                        Text(if (isEditing) "Update" else "Save")
+                    if (useVerticalActionButtons) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            OutlinedButton(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = onRetryScan,
+                                enabled = !state.isProcessing && canRetryScan
+                            ) {
+                                Text(stringResource(R.string.scan_retry_same_image))
+                            }
+
+                            Button(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = onSave,
+                                enabled = !state.isProcessing
+                            ) {
+                                Text(if (isEditing) "Update" else "Save")
+                            }
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            OutlinedButton(
+                                modifier = Modifier.weight(1f),
+                                onClick = onRetryScan,
+                                enabled = !state.isProcessing && canRetryScan
+                            ) {
+                                Text(stringResource(R.string.scan_retry_same_image))
+                            }
+
+                            Button(
+                                modifier = Modifier.weight(1f),
+                                onClick = onSave,
+                                enabled = !state.isProcessing
+                            ) {
+                                Text(if (isEditing) "Update" else "Save")
+                            }
+                        }
                     }
                 }
             } else if (state.errorMessage == null) {

@@ -193,6 +193,7 @@ fun CardListScreen(
     var hasInitializedCards by remember { mutableStateOf(false) }
     var highlightedNewCardId by remember { mutableStateOf<Long?>(null) }
     var showNewCardHighlight by remember { mutableStateOf(false) }
+    var celebratingWinCardIds by remember { mutableStateOf(setOf<Long>()) }
     val newCardBlinkTransition = rememberInfiniteTransition(label = "newCardBorder")
     val newCardBlinkAlpha by newCardBlinkTransition.animateFloat(
         initialValue = 0.25f,
@@ -232,13 +233,23 @@ fun CardListScreen(
 
         val oldWinIds = lastCards.filter { it.isActive && it.isWin }.map { it.cardId }.toSet()
         val newWins = state.cards.filter { it.isActive && it.isWin }.map { it.cardId }
-        val justWon = newWins.any { it !in oldWinIds }
+        val newlyWonIds = newWins.filter { it !in oldWinIds }
 
         val oldWaitIds = lastCards.filter { it.isActive && it.isNearWin }.map { it.cardId }.toSet()
         val newWaits = state.cards.filter { it.isActive && it.isNearWin }.map { it.cardId }
         val newWaiting = newWaits.any { it !in oldWaitIds }
 
-        if (justWon || newWaiting) {
+        if (newlyWonIds.isNotEmpty()) {
+            newlyWonIds.forEach { cardId ->
+                celebratingWinCardIds = celebratingWinCardIds + cardId
+                launch {
+                    delay(3_000)
+                    celebratingWinCardIds = celebratingWinCardIds - cardId
+                }
+            }
+        }
+
+        if (newlyWonIds.isNotEmpty() || newWaiting) {
             // Scroll to top since sorted cards place wins/waits first
             gridState.animateScrollToItem(0)
         }
@@ -588,7 +599,7 @@ fun CardListScreen(
                                 }
                             }
 
-                            if (item.isActive && item.isWin) {
+                            if (item.cardId in celebratingWinCardIds) {
                                 WinConfettiOverlay(modifier = Modifier.matchParentSize(), seed = item.cardId)
                             }
                         }
@@ -1326,6 +1337,7 @@ private fun BingoCardTable(
     cellSize: androidx.compose.ui.unit.Dp
 ) {
     val base = Color(item.colorArgb.toInt())
+    val cellsByPosition = remember(item.cells) { item.cells.associateBy { it.row to it.col } }
     val shape = MaterialTheme.shapes.small
     val winBorder = Color(0xFF2E7D32)
     val waitBorder = Color(0xFFF57C00)
@@ -1348,7 +1360,7 @@ private fun BingoCardTable(
                 for (col in 0 until BingoRules.GRID_SIZE) {
                     val idx = row * BingoRules.GRID_SIZE + col
                     val isFree = BingoRules.isFreeCell(row, col)
-                    val cell = item.cells.firstOrNull { it.row == row && it.col == col }
+                    val cell = cellsByPosition[row to col]
                     val text = if (isFree) "FREE" else cell?.value?.toString() ?: ""
                     val marked = cell?.isMarked == true || isFree
 
