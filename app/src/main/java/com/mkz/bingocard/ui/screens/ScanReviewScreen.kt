@@ -111,7 +111,7 @@ fun ScanReviewScreen(
                 value = state.cardName,
                 onValueChange = onNameChanged,
                 label = { Text("Card Name") },
-                placeholder = { Text("e.g. Card 1") },
+                placeholder = { Text("e.g. Card 9-21") },
                 singleLine = true
             )
 

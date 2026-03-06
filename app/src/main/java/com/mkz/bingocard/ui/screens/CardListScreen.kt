@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.text.KeyboardActions
@@ -97,6 +98,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -188,8 +190,46 @@ fun CardListScreen(
     val gridState = rememberLazyGridState()
     
     var lastCards by remember { mutableStateOf(state.cards) }
+    var hasInitializedCards by remember { mutableStateOf(false) }
+    var highlightedNewCardId by remember { mutableStateOf<Long?>(null) }
+    var showNewCardHighlight by remember { mutableStateOf(false) }
+    val newCardBlinkTransition = rememberInfiniteTransition(label = "newCardBorder")
+    val newCardBlinkAlpha by newCardBlinkTransition.animateFloat(
+        initialValue = 0.25f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 260, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "newCardBorderAlpha"
+    )
 
-    LaunchedEffect(state.cards) {
+    LaunchedEffect(state.isLoading, state.cards) {
+        if (!hasInitializedCards) {
+            if (!state.isLoading) {
+                // Treat restored cards as baseline so launch does not trigger "new card" effects.
+                lastCards = state.cards
+                hasInitializedCards = true
+            }
+            return@LaunchedEffect
+        }
+
+        val oldIds = lastCards.map { it.cardId }.toSet()
+        val newCard = state.cards.firstOrNull { it.cardId !in oldIds }
+        if (newCard != null) {
+            val index = state.cards.indexOfFirst { it.cardId == newCard.cardId }
+            if (index >= 0) {
+                gridState.animateScrollToItem(index)
+                highlightedNewCardId = newCard.cardId
+                showNewCardHighlight = true
+                delay(3_000)
+                showNewCardHighlight = false
+                highlightedNewCardId = null
+            }
+            lastCards = state.cards
+            return@LaunchedEffect
+        }
+
         val oldWinIds = lastCards.filter { it.isActive && it.isWin }.map { it.cardId }.toSet()
         val newWins = state.cards.filter { it.isActive && it.isWin }.map { it.cardId }
         val justWon = newWins.any { it !in oldWinIds }
@@ -424,10 +464,31 @@ fun CardListScreen(
                                             modifier = Modifier.weight(1f),
                                             verticalArrangement = Arrangement.spacedBy(4.dp)
                                         ) {
-                                            Text(
-                                                text = item.name,
-                                                style = MaterialTheme.typography.titleMedium
-                                            )
+                                            val nameChipContainer = base.copy(alpha = 0.18f)
+                                            val nameChipTextColor = if (nameChipContainer.luminance() > 0.55f) {
+                                                MaterialTheme.colorScheme.onSurface
+                                            } else {
+                                                Color.White
+                                            }
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(999.dp))
+                                                    .background(nameChipContainer)
+                                                    .border(
+                                                        width = 1.dp,
+                                                        color = base.copy(alpha = 0.65f),
+                                                        shape = RoundedCornerShape(999.dp)
+                                                    )
+                                                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                                                contentAlignment = Alignment.CenterStart
+                                            ) {
+                                                Text(
+                                                    text = item.name,
+                                                    style = MaterialTheme.typography.titleSmall,
+                                                    color = nameChipTextColor,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                            }
                                             if (item.isWin) {
                                                 Box(
                                                     modifier = Modifier
@@ -513,6 +574,18 @@ fun CardListScreen(
                                     style = Stroke(width = 6f),
                                     cornerRadius = androidx.compose.ui.geometry.CornerRadius(28f, 28f)
                                 )
+                            }
+
+                            if (showNewCardHighlight && highlightedNewCardId == item.cardId) {
+                                androidx.compose.foundation.Canvas(
+                                    modifier = Modifier.matchParentSize()
+                                ) {
+                                    drawRoundRect(
+                                        color = Color(0xFFFFEB3B).copy(alpha = newCardBlinkAlpha),
+                                        style = Stroke(width = 10f),
+                                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(28f, 28f)
+                                    )
+                                }
                             }
 
                             if (item.isActive && item.isWin) {

@@ -19,7 +19,7 @@ import java.net.URL
 object GitHubModelsClient {
 
     private const val ENDPOINT = "https://models.github.ai/inference/chat/completions"
-    private const val MODEL = "openai/gpt-4o-mini"
+    private const val MODEL = "openai/gpt-4.1-nano"
     private const val JPEG_QUALITY = 80
 
     /**

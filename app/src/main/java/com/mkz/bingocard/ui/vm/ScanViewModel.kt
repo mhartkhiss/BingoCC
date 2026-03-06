@@ -25,6 +25,7 @@ import org.json.JSONException
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.random.Random
 
 data class ScanUiState(
@@ -45,12 +46,14 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
         private const val MAX_DIMENSION = 480
         private val GITHUB_TOKENS: List<String> =
             BuildConfig.GITHUB_TOKENS.split(",").map { it.trim() }.filter { it.isNotBlank() }
+        private val tokenCursor = AtomicInteger(0)
     }
 
     private val _state = MutableStateFlow(ScanUiState())
     val state: StateFlow<ScanUiState> = _state
 
     private var createDraftState: ScanUiState = newCreateState()
+    private var isNameUserEdited: Boolean = false
 
     private fun newCreateState(): ScanUiState = ScanUiState(
         imageUri = null,
@@ -75,13 +78,27 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
         }
     }
 
+    /**
+     * Returns all configured tokens in a round-robin order so every new AI
+     * request starts with a different key while still falling back through all keys.
+     */
+    private fun tokensForCurrentRequest(): List<String> {
+        if (GITHUB_TOKENS.isEmpty()) return emptyList()
+        val start = Math.floorMod(tokenCursor.getAndIncrement(), GITHUB_TOKENS.size)
+        return List(GITHUB_TOKENS.size) { idx ->
+            GITHUB_TOKENS[(start + idx) % GITHUB_TOKENS.size]
+        }
+    }
+
     fun startCreateDraft() {
+        isNameUserEdited = createDraftState.cardName.isNotBlank()
         _state.value = createDraftState.copy(
             imageUri = null,
             isProcessing = false,
             errorMessage = null,
             editingCardId = null
         )
+        autoPopulateNameFromGridIfEligible(_state.value.grid)
     }
 
     /** Stores the image URI for the crop screen — no processing yet. */
@@ -154,7 +171,7 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
                 var mappedGrid: Array<Int?>? = null
                 var mappedColor: Long? = null
 
-                for (token in GITHUB_TOKENS) {
+                for (token in tokensForCurrentRequest()) {
                     try {
                         val respText = GitHubModelsClient.analyzeImage(
                             token = token,
@@ -184,7 +201,8 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
                         errorMessage = null
                     )
                     _state.value = updated
-                    updateCreateDraftIfNeeded(updated)
+                    autoPopulateNameFromGridIfEligible(mappedGrid)
+                    updateCreateDraftIfNeeded(_state.value)
                 } else {
                     val errorMsg = when (lastError) {
                         is kotlinx.coroutines.TimeoutCancellationException ->
@@ -288,10 +306,25 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
                 cardName = card.name,
                 editingCardId = card.id
             )
+            isNameUserEdited = true
         }
     }
 
     fun updateName(name: String) {
+        if (_state.value.editingCardId != null) {
+            val updated = _state.value.copy(cardName = name)
+            _state.value = updated
+            updateCreateDraftIfNeeded(updated)
+            return
+        }
+
+        if (name.isBlank()) {
+            isNameUserEdited = false
+            autoPopulateNameFromGridIfEligible(_state.value.grid)
+            return
+        }
+
+        isNameUserEdited = true
         val updated = _state.value.copy(cardName = name)
         _state.value = updated
         updateCreateDraftIfNeeded(updated)
@@ -304,7 +337,8 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
         }
         val updated = _state.value.copy(grid = copy)
         _state.value = updated
-        updateCreateDraftIfNeeded(updated)
+        autoPopulateNameFromGridIfEligible(copy)
+        updateCreateDraftIfNeeded(_state.value)
     }
 
     fun updateColor(colorArgb: Long) {
@@ -338,7 +372,37 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
         copy[idx] = value
         val updated = _state.value.copy(grid = copy)
         _state.value = updated
+        autoPopulateNameFromGridIfEligible(copy)
+        updateCreateDraftIfNeeded(_state.value)
+    }
+
+    private fun autoPopulateNameFromGridIfEligible(grid: Array<Int?>) {
+        val current = _state.value
+        if (current.editingCardId != null) return
+        if (isNameUserEdited) return
+
+        val suggested = buildAutoCardName(grid) ?: return
+        if (current.cardName == suggested) return
+
+        val updated = current.copy(cardName = suggested)
+        _state.value = updated
         updateCreateDraftIfNeeded(updated)
+    }
+
+    private fun buildAutoCardName(grid: Array<Int?>): String? {
+        val bFirst = firstColumnValue(grid, 0)
+        val iFirst = firstColumnValue(grid, 1)
+        if (bFirst == null || iFirst == null) return null
+        return "Card $bFirst-$iFirst"
+    }
+
+    private fun firstColumnValue(grid: Array<Int?>, col: Int): Int? {
+        for (row in 0 until BingoRules.GRID_SIZE) {
+            val idx = row * BingoRules.GRID_SIZE + col
+            val value = grid.getOrNull(idx)
+            if (value != null) return value
+        }
+        return null
     }
 
     /**
@@ -348,7 +412,9 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
         val current = _state.value
         val now = System.currentTimeMillis()
         val color = current.cardColor ?: (0xFF000000L or (Random.nextInt(0x00FFFFFF).toLong()))
-        val name = current.cardName.ifBlank { "Card ${Random.nextInt(1000, 10_000)}" }
+        val name = current.cardName.ifBlank {
+            buildAutoCardName(current.grid) ?: "Card ${Random.nextInt(1000, 10_000)}"
+        }
 
         val cells = ArrayList<CellEntity>(BingoRules.GRID_SIZE * BingoRules.GRID_SIZE)
         val editId = current.editingCardId ?: 0L
