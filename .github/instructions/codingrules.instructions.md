@@ -11,10 +11,15 @@ Keep coding style strictly modular, maintainable, and aligned with modern Androi
 - DRY and cleanliness: avoid duplicate code and keep logic clear with a robust folder hierarchy.
 - Separation of concerns: do not mix UI, business logic, and data access. Use suitable patterns like MVVM or MVI.
 
+## Agent Workflow
+- Structure reference: always use the `codebase-structure-reference` skill during workflow before making architecture-sensitive placement decisions or when you need the current repository/package layout.
+- Structure maintenance: when a task adds, removes, renames, or moves files, folders, packages, or modules, also use the `codebase-structure-maintenance` skill and update the shared structure reference in the same change.
+
 ## Android Kotlin Rules
 - Kotlin file limits: keep any single file (including Compose UIs and Services) under 500 lines.
 - Resource constraints: no hardcoded strings, colors, or dimens in Kotlin files. Use `strings.xml`, `colors.xml`, `dimens.xml`, and related resources. Keep shared constants in `Constants.kt`.
 - Self-correction and memory: when build errors are caused by missing imports, add imports and retain context across retries.
 
 ## Build Verification
-- Assemble debug check: verify changes by running `./gradlew assembleDebug` and ensure it succeeds before concluding work.
+- Assemble debug check: run `./gradlew assembleDebug` when the change affects Android/Kotlin behavior, spans multiple implementation files, or you are not confident the edits are error-free.
+- Skip full build verification for documentation-only or other non-executable changes where a project build would not add useful signal.
