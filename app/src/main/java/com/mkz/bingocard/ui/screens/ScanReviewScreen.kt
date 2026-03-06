@@ -39,6 +39,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -51,10 +52,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.mkz.bingocard.R
 import com.mkz.bingocard.domain.BingoRules
 import com.mkz.bingocard.ui.vm.ScanUiState
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import androidx.compose.ui.res.stringResource
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,6 +67,8 @@ fun ScanReviewScreen(
     onColorChanged: (Long) -> Unit,
     onNameChanged: (String) -> Unit,
     onRandomize: () -> Unit,
+    onResetInputs: () -> Unit,
+    onRetryScan: () -> Unit,
     onCameraScan: () -> Unit,
     onPickFromGallery: () -> Unit,
     onSave: () -> Unit,
@@ -81,6 +86,8 @@ fun ScanReviewScreen(
     val selectedColor = state.cardColor?.let { Color(it.toInt()) } ?: MaterialTheme.colorScheme.primary
     val isEditing = state.editingCardId != null
     val hasPopulatedGrid = state.grid.any { it != null }
+    val hasResettableInputs = hasPopulatedGrid || state.cardName.isNotBlank() || state.errorMessage != null || state.analyzedImageUri != null
+    val canRetryScan = !isEditing && state.imageUri != null && state.lastCropBounds != null
     var previewDismissed by remember(state.analyzedImageUri, hasPopulatedGrid) { mutableStateOf(false) }
     val showAnalyzedResultLayout = state.analyzedImageUri != null && hasPopulatedGrid && !previewDismissed
     val paletteScroll = rememberScrollState()
@@ -93,6 +100,13 @@ fun ScanReviewScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    if (!state.isProcessing && hasResettableInputs) {
+                        TextButton(onClick = onResetInputs) {
+                            Text(stringResource(R.string.scan_reset_inputs))
+                        }
                     }
                 }
             )
@@ -179,7 +193,31 @@ fun ScanReviewScreen(
                     }
                 }
             } else if (state.errorMessage != null) {
-                Text("Error: ${state.errorMessage}", color = MaterialTheme.colorScheme.error)
+                val errorMessage = state.errorMessage
+                val analyzedImageUri = state.analyzedImageUri
+                val analyzedImageSize = state.analyzedImageSizeBytes
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(errorMessage.orEmpty(), color = MaterialTheme.colorScheme.error)
+                    if (analyzedImageUri != null && analyzedImageSize != null) {
+                        AnalyzedImagePreview(
+                            imageUri = analyzedImageUri,
+                            imageSizeBytes = analyzedImageSize,
+                            expanded = true
+                        )
+                    }
+                    if (canRetryScan) {
+                        OutlinedButton(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = onRetryScan,
+                            enabled = !state.isProcessing
+                        ) {
+                            Text(stringResource(R.string.scan_retry_same_image))
+                        }
+                    }
+                }
             } else {
                 // Card with colored border matching selected color
                 ElevatedCard(
@@ -322,10 +360,10 @@ fun ScanReviewScreen(
                 ) {
                     OutlinedButton(
                         modifier = Modifier.weight(1f),
-                        onClick = { previewDismissed = true },
-                        enabled = !state.isProcessing
+                        onClick = onRetryScan,
+                        enabled = !state.isProcessing && canRetryScan
                     ) {
-                        Text("Retry")
+                        Text(stringResource(R.string.scan_retry_same_image))
                     }
 
                     Button(
@@ -336,7 +374,7 @@ fun ScanReviewScreen(
                         Text(if (isEditing) "Update" else "Save")
                     }
                 }
-            } else {
+            } else if (state.errorMessage == null) {
                 Button(
                     modifier = Modifier.fillMaxWidth(),
                     onClick = onSave,
@@ -344,6 +382,8 @@ fun ScanReviewScreen(
                 ) {
                     Text(if (isEditing) "Update" else "Save")
                 }
+            } else {
+                Spacer(modifier = Modifier.height(1.dp))
             }
         }
     }
@@ -378,7 +418,7 @@ private fun AnalyzedImagePreview(
                 verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Image Size · $sizeText",
+                    text = stringResource(R.string.scan_preview_instruction, sizeText),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

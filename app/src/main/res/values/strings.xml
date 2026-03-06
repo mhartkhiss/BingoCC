@@ -3,4 +3,7 @@
     <string name="sidebar_cards">Cards</string>
     <string name="sidebar_history">History</string>
     <string name="sidebar_win_patterns">Win Patterns</string>
+    <string name="scan_preview_instruction">Please double the inputs from analyzed image · %1$s</string>
+    <string name="scan_reset_inputs">Reset Inputs</string>
+    <string name="scan_retry_same_image">Retry Same Image</string>
 </resources>

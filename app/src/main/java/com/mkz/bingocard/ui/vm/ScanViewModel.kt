@@ -13,6 +13,7 @@ import com.mkz.bingocard.data.db.entities.CardEntity
 import com.mkz.bingocard.data.db.entities.CellEntity
 import com.mkz.bingocard.data.repo.BingoRepository
 import com.mkz.bingocard.domain.BingoRules
+import com.mkz.bingocard.vision.BingoCardAiResponseParser
 import com.mkz.bingocard.vision.GitHubModelsClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,9 +21,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-import org.json.JSONException
-import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.atomic.AtomicInteger
@@ -37,7 +35,15 @@ data class ScanUiState(
     val cardName: String = "",
     val editingCardId: Long? = null,
     val analyzedImageUri: Uri? = null,
-    val analyzedImageSizeBytes: Long? = null
+    val analyzedImageSizeBytes: Long? = null,
+    val lastCropBounds: CropBounds? = null
+)
+
+data class CropBounds(
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float
 )
 
 class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
@@ -53,6 +59,7 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
     val state: StateFlow<ScanUiState> = _state
 
     private var createDraftState: ScanUiState = newCreateState()
+    private var editBaselineState: ScanUiState? = null
     private var isNameUserEdited: Boolean = false
 
     private fun newCreateState(): ScanUiState = ScanUiState(
@@ -64,7 +71,8 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
         cardName = "",
         editingCardId = null,
         analyzedImageUri = null,
-        analyzedImageSizeBytes = null
+        analyzedImageSizeBytes = null,
+        lastCropBounds = null
     )
 
     private fun updateCreateDraftIfNeeded(updated: ScanUiState) {
@@ -91,6 +99,7 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
     }
 
     fun startCreateDraft() {
+        editBaselineState = null
         isNameUserEdited = createDraftState.cardName.isNotBlank()
         _state.value = createDraftState.copy(
             imageUri = null,
@@ -127,7 +136,12 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
      */
     fun analyzeCroppedImage(left: Float, top: Float, right: Float, bottom: Float) {
         val uri = _state.value.imageUri ?: return
-        _state.value = _state.value.copy(isProcessing = true, errorMessage = null)
+        val cropBounds = CropBounds(left, top, right, bottom)
+        _state.value = _state.value.copy(
+            isProcessing = true,
+            errorMessage = null,
+            lastCropBounds = cropBounds
+        )
 
         viewModelScope.launch {
             try {
@@ -155,17 +169,7 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
                     errorMessage = null
                 )
 
-                val prompt = """
-                    This is an image of a Bingo ticket/card.
-                    1. Extract the 5x5 grid of numbers. Use 'null' exactly in the 13th spot (index 12) for the FREE space.
-                    2. Determine the border/edge color or the BINGO text color of the physical bingo card (the color of the card's outer border or frame, not the background or numbers).
-                    Return ONLY a JSON object with this exact structure:
-                    {
-                      "grid": [25 integers/nulls],
-                      "color": "#RRGGBB"
-                    }
-                    Do not wrap with ```json or any other text.
-                """.trimIndent()
+                val prompt = BingoCardAiResponseParser.prompt
 
                 var lastError: Throwable? = null
                 var mappedGrid: Array<Int?>? = null
@@ -179,14 +183,10 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
                             prompt = prompt
                         ).trim()
 
-                        val result = parseResponse(respText)
-                        if (result != null) {
-                            mappedGrid = result.first
-                            mappedColor = result.second
-                            break
-                        } else {
-                            lastError = IllegalStateException("Failed to parse AI response")
-                        }
+                        val result = BingoCardAiResponseParser.parse(respText)
+                        mappedGrid = result.grid
+                        mappedColor = result.colorArgb
+                        break
                     } catch (t: Throwable) {
                         t.printStackTrace()
                         lastError = t
@@ -237,33 +237,6 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
         return Bitmap.createScaledBitmap(bitmap, newW, newH, true)
     }
 
-    private fun parseResponse(jsonText: String): Pair<Array<Int?>, Long?>? {
-        val grid = Array<Int?>(25) { null }
-        var parsedColor: Long? = null
-        try {
-            val cleanJson = jsonText
-                .removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
-            val jsonObj = JSONObject(cleanJson)
-            val jsonArray = jsonObj.optJSONArray("grid") ?: return null
-
-            for (i in 0 until minOf(25, jsonArray.length())) {
-                if (!jsonArray.isNull(i)) {
-                    grid[i] = jsonArray.getInt(i)
-                }
-            }
-            grid[12] = null // Ensure free space is always null
-
-            val colorStr = jsonObj.optString("color")
-            if (colorStr.isNotEmpty() && colorStr.startsWith("#")) {
-                try {
-                    parsedColor = android.graphics.Color.parseColor(colorStr).toLong()
-                } catch (_: Exception) { }
-            }
-            return Pair(grid, parsedColor)
-        } catch (_: JSONException) { }
-        return null
-    }
-
     private fun persistAnalyzedPreview(bitmap: Bitmap): Pair<Uri, Long> {
         val context = appContextProvider()
         val file = File(context.cacheDir, "analyzed_preview.jpg")
@@ -275,8 +248,54 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
     }
 
     fun onManualCreate() {
+        editBaselineState = null
+        isNameUserEdited = false
         createDraftState = newCreateState()
         _state.value = createDraftState
+    }
+
+    fun resetInputs() {
+        val current = _state.value
+        if (current.isProcessing) return
+
+        if (current.editingCardId != null) {
+            val baseline = editBaselineState ?: return
+            _state.value = baseline.copy(
+                isProcessing = false,
+                errorMessage = null,
+                analyzedImageUri = null,
+                analyzedImageSizeBytes = null,
+                imageUri = current.imageUri,
+                lastCropBounds = current.lastCropBounds
+            )
+            isNameUserEdited = true
+            return
+        }
+
+        val resetState = current.copy(
+            isProcessing = false,
+            errorMessage = null,
+            grid = Array(BingoRules.GRID_SIZE * BingoRules.GRID_SIZE) { null },
+            cardColor = 0xFF42A5F5,
+            cardName = "",
+            analyzedImageUri = null,
+            analyzedImageSizeBytes = null
+        )
+        isNameUserEdited = false
+        _state.value = resetState
+        updateCreateDraftIfNeeded(resetState)
+    }
+
+    fun retryLastScan() {
+        val current = _state.value
+        val cropBounds = current.lastCropBounds ?: return
+        if (current.imageUri == null || current.isProcessing) return
+        analyzeCroppedImage(
+            left = cropBounds.left,
+            top = cropBounds.top,
+            right = cropBounds.right,
+            bottom = cropBounds.bottom
+        )
     }
 
     /**
@@ -306,6 +325,7 @@ class ScanViewModel(private val repo: BingoRepository) : ViewModel() {
                 cardName = card.name,
                 editingCardId = card.id
             )
+            editBaselineState = _state.value.copy()
             isNameUserEdited = true
         }
     }

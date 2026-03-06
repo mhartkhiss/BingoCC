@@ -314,6 +314,8 @@ fun BingoApp() {
                         onColorChanged = { scanVm.updateColor(it) },
                         onNameChanged = { scanVm.updateName(it) },
                         onRandomize = { scanVm.randomizeGrid() },
+                        onResetInputs = { scanVm.resetInputs() },
+                        onRetryScan = { scanVm.retryLastScan() },
                         onCameraScan = { navController.navigate(Routes.ScanCamera) },
                         onPickFromGallery = { galleryLauncher.launch("image/*") },
                         onSave = {
